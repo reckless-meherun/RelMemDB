@@ -1,0 +1,20 @@
+{
+  "dataset": "preflight_relational_qa_baseline",
+  "files": {
+    "H1.jsonl": {
+      "examples": 200,
+      "sha256": "aa61a4f05c759711cd521a17ef10af088f75bda53c85d345cf5eabc1a007d84b"
+    },
+    "H2.jsonl": {
+      "examples": 200,
+      "sha256": "6fd6b559c6ec32ed9369fa8fbcb801498804e616fcca73173be6dc10e334f3e9"
+    },
+    "H3.jsonl": {
+      "examples": 200,
+      "sha256": "313f6982f33c27a2f8ddbf3f7d2fdd8e76fc8d2566e1e76cbc3b8b9cd7275573"
+    }
+  },
+  "namespace": "preflight_baseline_v1",
+  "seed": 2025,
+  "total_examples": 600
+}

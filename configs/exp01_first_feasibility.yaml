@@ -46,6 +46,11 @@ evaluation:
 
 preflight:
   relational_hops: [1, 2, 3]
+  baseline_examples_per_hop: 200
+  baseline_strict_em_threshold: 0.90
+  copy_control_threshold: 0.95
+  max_input_length: 256
+  max_new_tokens: 24
   generic_relational_skill_training: conditional_if_needed
   qa_examples_range:
     minimum: 10000

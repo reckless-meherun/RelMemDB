@@ -241,6 +241,20 @@ def validate_config(config: dict[str, Any]) -> None:
         "preflight.relational_hops",
         allow_zero=False,
     )
+    _require_positive_int(
+        _required(preflight, "baseline_examples_per_hop", "preflight"),
+        "preflight.baseline_examples_per_hop",
+    )
+    for key in ("baseline_strict_em_threshold", "copy_control_threshold"):
+        threshold = _require_number(
+            _required(preflight, key, "preflight"), f"preflight.{key}"
+        )
+        if not 0.0 <= threshold <= 1.0:
+            raise ConfigError(f"preflight.{key} must be between 0 and 1")
+    for key in ("max_input_length", "max_new_tokens"):
+        _require_positive_int(
+            _required(preflight, key, "preflight"), f"preflight.{key}"
+        )
     if latent_positions < max([*hops, *preflight_hops]) + 1:
         raise ConfigError(
             "data.master_world.latent_positions must support the largest requested hop"
