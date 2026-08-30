@@ -1,12 +1,21 @@
+from collections import Counter
 from copy import deepcopy
 import json
+from pathlib import Path
+import sqlite3
 from typing import Any
 
 import pytest
 
 from config import ConfigError, load_config, validate_config
+from data.materialize import (
+    build_database_manifest,
+    materialize_database,
+    partition_latent_positions,
+)
 from data.world import build_master_world, derive_master_world_counts
-from utils.hashing import hash_json_object
+from utils.hashing import hash_file, hash_json_object
+from utils.paths import n_sweep_database_dir, t_sweep_database_dir
 
 
 @pytest.fixture(scope="module")
@@ -224,3 +233,254 @@ def test_invalid_master_world_config_is_rejected(
     invalid_config["data"]["master_world"][field] = value
     with pytest.raises(ConfigError):
         validate_config(invalid_config)
+
+
+def _user_tables(connection: sqlite3.Connection) -> list[str]:
+    return [
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name"
+        )
+    ]
+
+
+def _database_logical_values(database_path: Path) -> Counter[str]:
+    values: Counter[str] = Counter()
+    with sqlite3.connect(database_path) as connection:
+        for table_name in _user_tables(connection):
+            for row in connection.execute(f'SELECT * FROM "{table_name}"'):
+                values.update(row)
+    return values
+
+
+def _master_world_logical_values(chains: list[dict[str, Any]]) -> Counter[str]:
+    values: Counter[str] = Counter()
+    for chain in chains:
+        for entity in chain["entities"]:
+            values.update([entity["entity_id"]])
+            values.update(attribute["value"] for attribute in entity["attributes"])
+        values.update(
+            relation["target_entity_id"] for relation in chain["relations"]
+        )
+    return values
+
+
+def test_position_partitioning() -> None:
+    t4 = partition_latent_positions(12, 4)
+    t8 = partition_latent_positions(12, 8)
+    t12 = partition_latent_positions(12, 12)
+
+    assert t4 == [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]]
+    assert [len(group) for group in t4] == [3, 3, 3, 3]
+    assert [len(group) for group in t8] == [2, 2, 2, 2, 1, 1, 1, 1]
+    assert [len(group) for group in t12] == [1] * 12
+
+    for partition in (t4, t8, t12):
+        assert [position for group in partition for position in group] == list(range(12))
+        assert all(group == list(range(group[0], group[-1] + 1)) for group in partition)
+
+
+@pytest.mark.parametrize("table_count", (4, 8, 12))
+def test_physical_schema_rows_facts_and_integrity(
+    tmp_path: Path,
+    small_world: dict[str, Any],
+    table_count: int,
+) -> None:
+    database_path = tmp_path / f"t{table_count}.sqlite"
+    logical_fact_count = 200
+    selected_chain_count = logical_fact_count // 40
+    metadata = materialize_database(
+        small_world,
+        table_count=table_count,
+        logical_fact_count=logical_fact_count,
+        output_path=database_path,
+    )
+
+    with sqlite3.connect(database_path) as connection:
+        tables = _user_tables(connection)
+        assert len(tables) == table_count
+        assert sum(
+            len(connection.execute(f'PRAGMA foreign_key_list("{table}")').fetchall())
+            for table in tables
+        ) == table_count - 1
+
+        total_rows = 0
+        total_logical_values = 0
+        for table_index, (table, positions) in enumerate(
+            zip(tables, metadata["position_partition"], strict=True)
+        ):
+            row_count = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}"'
+            ).fetchone()[0]
+            columns = connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+            primary_key_columns = [column[1] for column in columns if column[5]]
+            assert row_count == selected_chain_count
+            assert primary_key_columns == [f"p{positions[-1]:02d}_entity_id"]
+            total_rows += row_count
+            total_logical_values += row_count * len(columns)
+
+            foreign_keys = connection.execute(
+                f'PRAGMA foreign_key_list("{table}")'
+            ).fetchall()
+            if table_index == 0:
+                assert foreign_keys == []
+            else:
+                assert len(foreign_keys) == 1
+                assert foreign_keys[0][2] == tables[table_index - 1]
+
+        assert total_rows == table_count * selected_chain_count
+        assert total_logical_values == logical_fact_count
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+    assert metadata["actual_logical_fact_count"] == logical_fact_count
+    assert metadata["physical_row_count"] == table_count * selected_chain_count
+
+
+def test_same_logical_content_across_table_counts(
+    tmp_path: Path, small_world: dict[str, Any]
+) -> None:
+    logical_fact_count = 200
+    expected_values = _master_world_logical_values(small_world["chains"][:5])
+    hashes: set[str] = set()
+
+    for table_count in (4, 8, 12):
+        database_path = tmp_path / f"same_content_t{table_count}.sqlite"
+        metadata = materialize_database(
+            small_world,
+            table_count=table_count,
+            logical_fact_count=logical_fact_count,
+            output_path=database_path,
+        )
+        hashes.add(metadata["logical_content_sha256"])
+        assert _database_logical_values(database_path) == expected_values
+
+    assert len(hashes) == 1
+
+
+def test_nested_n_materializations(
+    tmp_path: Path, default_world: dict[str, Any]
+) -> None:
+    materialized_values: list[Counter[str]] = []
+    for logical_fact_count in (5_000, 10_000, 20_000):
+        database_path = tmp_path / f"n{logical_fact_count}.sqlite"
+        metadata = materialize_database(
+            default_world,
+            table_count=8,
+            logical_fact_count=logical_fact_count,
+            output_path=database_path,
+        )
+        selected_chains = logical_fact_count // 40
+        values = _database_logical_values(database_path)
+        assert values == _master_world_logical_values(
+            default_world["chains"][:selected_chains]
+        )
+        assert sum(values.values()) == logical_fact_count
+        assert metadata["selected_chain_count"] == selected_chains
+        materialized_values.append(values)
+
+    n5k, n10k, n20k = materialized_values
+    assert n5k != n10k and n5k <= n10k
+    assert n10k != n20k and n10k <= n20k
+
+
+@pytest.mark.parametrize("table_count", (4, 8, 12))
+def test_stored_relations_match_master_world(
+    tmp_path: Path,
+    small_world: dict[str, Any],
+    table_count: int,
+) -> None:
+    database_path = tmp_path / f"relations_t{table_count}.sqlite"
+    metadata = materialize_database(
+        small_world,
+        table_count=table_count,
+        logical_fact_count=200,
+        output_path=database_path,
+    )
+    selected_chains = small_world["chains"][:5]
+
+    with sqlite3.connect(database_path) as connection:
+        for table_index, positions in enumerate(metadata["position_partition"]):
+            table_name = f"table_{table_index:02d}"
+            for position in positions:
+                if position == 0:
+                    continue
+                stored = dict(
+                    connection.execute(
+                        f'SELECT "p{position:02d}_entity_id", '
+                        f'"p{position:02d}_previous_entity_id" '
+                        f'FROM "{table_name}"'
+                    ).fetchall()
+                )
+                expected = {
+                    chain["entities"][position]["entity_id"]: chain["relations"][
+                        position - 1
+                    ]["target_entity_id"]
+                    for chain in selected_chains
+                }
+                assert stored == expected
+
+
+def test_condition_manifest_accounting_and_hashes(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    database_path = tmp_path / "manifest.sqlite"
+    metadata = materialize_database(
+        small_world,
+        table_count=4,
+        logical_fact_count=200,
+        output_path=database_path,
+    )
+    manifest = build_database_manifest(
+        default_config,
+        metadata,
+        sweep="t_sweep",
+        master_world_sha256="master-hash",
+        configuration_sha256="config-hash",
+        database_sha256=hash_file(database_path),
+    )
+
+    assert manifest["T"] == manifest["table_count"] == 4
+    assert manifest["requested_N"] == manifest["actual_logical_fact_count"] == 200
+    assert manifest["selected_chain_count"] == 5
+    assert manifest["entity_identifier_fact_count"] == 60
+    assert manifest["attribute_fact_count"] == 85
+    assert manifest["relation_fact_count"] == 55
+    assert (
+        manifest["entity_identifier_fact_count"]
+        + manifest["attribute_fact_count"]
+        + manifest["relation_fact_count"]
+        == manifest["actual_logical_fact_count"]
+    )
+    assert manifest["cross_table_fk_edge_count"] == 3
+    assert manifest["physical_row_count"] == 20
+    assert set(manifest["rows_per_table"].values()) == {5}
+    assert manifest["position_partition"] == partition_latent_positions(12, 4)
+    assert manifest["cross_table_fk_instance_count"] == 15
+    assert manifest["intra_table_relation_instance_count"] == 40
+    assert (
+        manifest["cross_table_fk_instance_count"]
+        + manifest["intra_table_relation_instance_count"]
+        == 11 * manifest["selected_chain_count"]
+    )
+    assert manifest["master_world_sha256"] == "master-hash"
+    assert manifest["configuration_sha256"] == "config-hash"
+    assert manifest["database_sha256"] == hash_file(database_path)
+
+
+def test_n10k_reuses_t8_path() -> None:
+    assert n_sweep_database_dir(10_000) == t_sweep_database_dir(8)
+    assert not (n_sweep_database_dir(5_000).parent / "N10K").exists()
+
+
+def test_optional_n40k_placeholders_remain_empty(
+    default_config: dict[str, Any],
+) -> None:
+    condition_dir = n_sweep_database_dir(40_000)
+    assert default_config["data"]["optional_n40k"]["enabled"] is False
+    assert (condition_dir / "database.sqlite").stat().st_size == 0
+    assert (condition_dir / "manifest.json").stat().st_size == 0

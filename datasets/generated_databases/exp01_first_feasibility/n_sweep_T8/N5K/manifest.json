@@ -1,0 +1,66 @@
+{
+  "T": 8,
+  "actual_logical_fact_count": 5000,
+  "atomic_facts_per_chain": 40,
+  "attribute_fact_count": 2125,
+  "attribute_facts_per_chain": 17,
+  "configuration_sha256": "bc3ffc54fdd2908843b5104b964d0b5f63725595aded2d21ba008ca5622d32cc",
+  "cross_table_fk_edge_count": 7,
+  "cross_table_fk_instance_count": 875,
+  "database_sha256": "7d839d395a21a5a7486b0a12d88df3e8e073f68a8dae6672c28ae475c8d7aa6f",
+  "entity_identifier_fact_count": 1500,
+  "entity_identifier_facts_per_chain": 12,
+  "experiment_name": "exp01_first_feasibility",
+  "format_version": 1,
+  "intra_table_relation_instance_count": 500,
+  "latent_positions": 12,
+  "logical_content_sha256": "92971d766ef40237a11cb0a18c879e9b08d141ff634230ee628c6781c37b01f7",
+  "master_world_sha256": "5fe39f3251adb74f978c1238f9cf3880a3b08d7be8f3754f88fad6105032db60",
+  "physical_row_count": 1000,
+  "position_partition": [
+    [
+      0,
+      1
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      4,
+      5
+    ],
+    [
+      6,
+      7
+    ],
+    [
+      8
+    ],
+    [
+      9
+    ],
+    [
+      10
+    ],
+    [
+      11
+    ]
+  ],
+  "relation_fact_count": 1375,
+  "relation_facts_per_chain": 11,
+  "requested_N": 5000,
+  "rows_per_table": {
+    "table_00": 125,
+    "table_01": 125,
+    "table_02": 125,
+    "table_03": 125,
+    "table_04": 125,
+    "table_05": 125,
+    "table_06": 125,
+    "table_07": 125
+  },
+  "selected_chain_count": 125,
+  "sweep": "n_sweep",
+  "table_count": 8
+}
