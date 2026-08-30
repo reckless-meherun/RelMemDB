@@ -1,0 +1,29 @@
+{
+  "T": 8,
+  "experiment_name": "exp01_first_feasibility",
+  "fact_exposure": 4,
+  "format_version": 1,
+  "logical_content_sha256": "92971d766ef40237a11cb0a18c879e9b08d141ff634230ee628c6781c37b01f7",
+  "logical_facts_per_exposure": 5000,
+  "physical_rows_per_exposure": 1000,
+  "requested_N": 5000,
+  "schema_foreign_key_count_per_exposure": 7,
+  "schema_intra_table_relation_count_per_exposure": 4,
+  "schema_relationship_count_per_exposure": 11,
+  "serialization_order": {
+    "columns": "physical column order",
+    "exposures": "identical complete database blocks",
+    "rows": "ascending SQLite rowid; rowid is not serialized",
+    "tables": "ascending table name"
+  },
+  "serialized_logical_fact_occurrences": 20000,
+  "serialized_row_line_count": 4000,
+  "source_database_manifest_sha256": "27722d4521cd5ae446bcf30fa84f66ac7013ef040276af013f2443f8dd56eacc",
+  "source_database_sha256": "7d839d395a21a5a7486b0a12d88df3e8e073f68a8dae6672c28ae475c8d7aa6f",
+  "table_count": 8,
+  "total_schema_column_count": 40,
+  "train_text_byte_count": 1146576,
+  "train_text_character_count": 1146576,
+  "train_text_line_count": 4156,
+  "train_text_sha256": "0f7aa8359234ed8c546771650406656ed2e20cb3bc4b9cdf543e462bad506ecc"
+}

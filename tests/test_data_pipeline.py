@@ -13,9 +13,14 @@ from data.materialize import (
     materialize_database,
     partition_latent_positions,
 )
+from data.serialize import (
+    build_database_serialization_block,
+    serialize_database_cpt,
+)
 from data.world import build_master_world, derive_master_world_counts
 from utils.hashing import hash_file, hash_json_object
-from utils.paths import n_sweep_database_dir, t_sweep_database_dir
+from utils.io import read_text, write_json
+from utils.paths import PROJECT_ROOT, n_sweep_database_dir, t_sweep_database_dir
 
 
 @pytest.fixture(scope="module")
@@ -484,3 +489,272 @@ def test_optional_n40k_placeholders_remain_empty(
     assert default_config["data"]["optional_n40k"]["enabled"] is False
     assert (condition_dir / "database.sqlite").stat().st_size == 0
     assert (condition_dir / "manifest.json").stat().st_size == 0
+    assert (condition_dir / "cpt" / "train.txt").stat().st_size == 0
+    assert (condition_dir / "cpt" / "manifest.json").stat().st_size == 0
+
+
+def _serialized_values(serialization_block: str) -> Counter[str]:
+    values: Counter[str] = Counter()
+    for line in serialization_block.splitlines():
+        if not line.startswith("ROW "):
+            continue
+        for field in line.split(" | ")[1:]:
+            _, separator, value = field.partition("=")
+            assert separator == "="
+            values[value] += 1
+    return values
+
+
+def _build_serialized_test_condition(
+    tmp_path: Path,
+    config: dict[str, Any],
+    world: dict[str, Any],
+    *,
+    table_count: int = 4,
+    logical_fact_count: int = 200,
+) -> tuple[Path, Path, Path, Path, dict[str, Any]]:
+    database_path = tmp_path / "database.sqlite"
+    database_manifest_path = tmp_path / "database_manifest.json"
+    train_text_path = tmp_path / "train.txt"
+    cpt_manifest_path = tmp_path / "cpt_manifest.json"
+    materialization = materialize_database(
+        world,
+        table_count=table_count,
+        logical_fact_count=logical_fact_count,
+        output_path=database_path,
+    )
+    database_manifest = build_database_manifest(
+        config,
+        materialization,
+        sweep="test_sweep",
+        master_world_sha256="master-hash",
+        configuration_sha256="configuration-hash",
+        database_sha256=hash_file(database_path),
+    )
+    write_json(database_manifest_path, database_manifest)
+    cpt_manifest = serialize_database_cpt(
+        config,
+        database_path=database_path,
+        database_manifest_path=database_manifest_path,
+        train_text_path=train_text_path,
+    )
+    write_json(cpt_manifest_path, cpt_manifest)
+    return (
+        database_path,
+        database_manifest_path,
+        train_text_path,
+        cpt_manifest_path,
+        cpt_manifest,
+    )
+
+
+def test_cpt_serialization_is_deterministic(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    (
+        database_path,
+        database_manifest_path,
+        train_text_path,
+        cpt_manifest_path,
+        first_manifest,
+    ) = _build_serialized_test_condition(tmp_path, default_config, small_world)
+    first_train_bytes = train_text_path.read_bytes()
+    first_manifest_bytes = cpt_manifest_path.read_bytes()
+
+    second_manifest = serialize_database_cpt(
+        default_config,
+        database_path=database_path,
+        database_manifest_path=database_manifest_path,
+        train_text_path=train_text_path,
+    )
+    write_json(cpt_manifest_path, second_manifest)
+
+    assert second_manifest == first_manifest
+    assert train_text_path.read_bytes() == first_train_bytes
+    assert cpt_manifest_path.read_bytes() == first_manifest_bytes
+
+
+def test_cpt_exact_exposure_and_repeated_blocks(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    database_path, _, train_text_path, _, manifest = (
+        _build_serialized_test_condition(tmp_path, default_config, small_world)
+    )
+    block, metadata = build_database_serialization_block(database_path)
+    train_text = read_text(train_text_path)
+    fact_exposure = default_config["training"]["fact_exposure"]
+
+    assert metadata["logical_fact_occurrences"] == 200
+    assert sum(
+        line.count("=")
+        for line in block.splitlines()
+        if line.startswith("ROW ")
+    ) == 200
+    assert train_text == block * fact_exposure
+    assert [
+        train_text[index * len(block) : (index + 1) * len(block)]
+        for index in range(fact_exposure)
+    ] == [block] * fact_exposure
+    assert manifest["serialized_logical_fact_occurrences"] == 200 * fact_exposure
+    assert manifest["serialized_row_line_count"] == (
+        metadata["physical_row_count"] * fact_exposure
+    )
+
+
+def test_cpt_data_fidelity(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    database_path, _, _, _, _ = _build_serialized_test_condition(
+        tmp_path, default_config, small_world
+    )
+    block, _ = build_database_serialization_block(database_path)
+    assert _serialized_values(block) == _database_logical_values(database_path)
+
+
+@pytest.mark.parametrize(
+    ("table_count", "foreign_key_count", "relation_count"),
+    ((4, 3, 8), (8, 7, 4), (12, 11, 0)),
+)
+def test_cpt_schema_relationship_counts(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+    table_count: int,
+    foreign_key_count: int,
+    relation_count: int,
+) -> None:
+    database_path, _, _, _, manifest = _build_serialized_test_condition(
+        tmp_path,
+        default_config,
+        small_world,
+        table_count=table_count,
+    )
+    block, metadata = build_database_serialization_block(database_path)
+
+    assert sum(line.startswith("FOREIGN_KEY ") for line in block.splitlines()) == (
+        foreign_key_count
+    )
+    assert sum(line.startswith("RELATION ") for line in block.splitlines()) == (
+        relation_count
+    )
+    assert metadata["schema_relationship_count"] == 11
+    assert manifest["schema_relationship_count_per_exposure"] == 11
+    assert manifest["schema_foreign_key_count_per_exposure"] == foreign_key_count
+    assert (
+        manifest["schema_intra_table_relation_count_per_exposure"]
+        == relation_count
+    )
+
+
+def test_cpt_same_n10k_information_across_t() -> None:
+    value_multisets = []
+    logical_hashes = []
+    for table_count in (4, 8, 12):
+        condition_dir = t_sweep_database_dir(table_count)
+        block, metadata = build_database_serialization_block(
+            condition_dir / "database.sqlite"
+        )
+        database_manifest = json.loads(
+            read_text(condition_dir / "manifest.json")
+        )
+        assert metadata["logical_fact_occurrences"] == 10_000
+        value_multisets.append(_serialized_values(block))
+        logical_hashes.append(database_manifest["logical_content_sha256"])
+
+    assert value_multisets[0] == value_multisets[1] == value_multisets[2]
+    assert len(set(logical_hashes)) == 1
+
+
+def test_cpt_nested_n_content() -> None:
+    conditions = (
+        n_sweep_database_dir(5_000),
+        t_sweep_database_dir(8),
+        n_sweep_database_dir(20_000),
+    )
+    value_multisets = [
+        _serialized_values(
+            build_database_serialization_block(
+                condition_dir / "database.sqlite"
+            )[0]
+        )
+        for condition_dir in conditions
+    ]
+    n5k, n10k, n20k = value_multisets
+    assert n5k != n10k and n5k <= n10k
+    assert n10k != n20k and n10k <= n20k
+
+
+def test_cpt_has_no_metadata_or_sql_leakage(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    _, _, train_text_path, _, _ = _build_serialized_test_condition(
+        tmp_path, default_config, small_world
+    )
+    train_text = read_text(train_text_path)
+    lowercase_text = train_text.lower()
+
+    for forbidden in (
+        "chain_index",
+        "seed",
+        "sha256",
+        "master-hash",
+        "configuration-hash",
+        str(PROJECT_ROOT).lower(),
+        "t_sweep",
+        "n_sweep",
+        "n10k",
+        "n5k",
+        "n20k",
+        "t4/n10k",
+        "t8/n10k",
+        "t12/n10k",
+    ):
+        assert forbidden not in lowercase_text
+    for sql_statement in ("CREATE TABLE", "SELECT", "INSERT", "PRAGMA"):
+        assert sql_statement not in train_text
+    assert "rowid" not in lowercase_text
+
+
+def test_cpt_manifest_accounting(
+    tmp_path: Path,
+    default_config: dict[str, Any],
+    small_world: dict[str, Any],
+) -> None:
+    (
+        database_path,
+        database_manifest_path,
+        train_text_path,
+        _,
+        manifest,
+    ) = _build_serialized_test_condition(tmp_path, default_config, small_world)
+    train_text = read_text(train_text_path)
+
+    assert manifest["format_version"] == 1
+    assert manifest["T"] == manifest["table_count"] == 4
+    assert manifest["requested_N"] == manifest["logical_facts_per_exposure"] == 200
+    assert manifest["fact_exposure"] == default_config["training"]["fact_exposure"]
+    assert manifest["serialized_logical_fact_occurrences"] == 800
+    assert manifest["physical_rows_per_exposure"] == 20
+    assert manifest["serialized_row_line_count"] == 80
+    assert manifest["total_schema_column_count"] == 40
+    assert manifest["schema_relationship_count_per_exposure"] == 11
+    assert manifest["source_database_sha256"] == hash_file(database_path)
+    assert manifest["source_database_manifest_sha256"] == hash_file(
+        database_manifest_path
+    )
+    assert manifest["train_text_sha256"] == hash_file(train_text_path)
+    assert manifest["train_text_byte_count"] == len(train_text.encode("utf-8"))
+    assert manifest["train_text_character_count"] == len(train_text)
+    assert manifest["train_text_line_count"] == train_text.count("\n")
+
+
+def test_no_duplicate_n10k_cpt_directory() -> None:
+    assert not (n_sweep_database_dir(5_000).parent / "N10K").exists()

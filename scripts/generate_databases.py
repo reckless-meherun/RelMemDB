@@ -9,6 +9,7 @@ if str(SRC_DIR) not in sys.path:
 
 from config import DEFAULT_CONFIG_PATH, load_config
 from data.materialize import build_database_manifest, materialize_database
+from data.serialize import serialize_database_cpt
 from data.world import build_master_world
 from utils.hashing import hash_file
 from utils.io import read_json, write_json
@@ -77,10 +78,27 @@ def _materialize_condition(
         database_sha256=hash_file(database_path),
     )
     write_json(manifest_path, manifest)
+
+    cpt_dir = condition_dir / "cpt"
+    train_text_path = cpt_dir / "train.txt"
+    cpt_manifest_path = cpt_dir / "manifest.json"
+    for output_path in (train_text_path, cpt_manifest_path):
+        if not output_path.is_file():
+            raise FileNotFoundError(
+                f"required scaffold output file does not exist: {output_path}"
+            )
+    cpt_manifest = serialize_database_cpt(
+        config,
+        database_path=database_path,
+        database_manifest_path=manifest_path,
+        train_text_path=train_text_path,
+    )
+    write_json(cpt_manifest_path, cpt_manifest)
     print(
         f"{sweep}: T={table_count}, N={logical_fact_count}, "
         f"chains={materialization['selected_chain_count']}, "
-        f"database={database_path.relative_to(PROJECT_ROOT)}"
+        f"database={database_path.relative_to(PROJECT_ROOT)}, "
+        f"cpt={train_text_path.relative_to(PROJECT_ROOT)}"
     )
     return manifest
 
@@ -121,7 +139,7 @@ def main() -> None:
         )
 
     if data["optional_n40k"]["enabled"]:
-        raise NotImplementedError("optional N40K materialization is not enabled in Step 3")
+        raise NotImplementedError("optional N40K generation is not enabled in Step 4")
 
 
 if __name__ == "__main__":
