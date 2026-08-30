@@ -1,0 +1,53 @@
+experiment:
+  name: exp01_first_feasibility
+  seed: 2025
+
+model:
+  name: gpt2
+  layers: 12
+  hidden_size: 768
+  attention_heads: 12
+  context_length: 256
+  precision: bf16
+
+data:
+  schema_topology: chain
+  same_master_world: true
+  nested_n_subsets: true
+  reuse_t8_n10k: true
+  hops: [0, 1, 2, 3]
+  t_sweep:
+    fact_count: 10000
+    table_counts: [4, 8, 12]
+  n_sweep:
+    table_count: 8
+    fact_counts: [5000, 10000, 20000]
+  optional_n40k:
+    enabled: false
+    fact_count: 40000
+
+training:
+  fact_exposure: 4
+  optimizer: adamw
+  learning_rate: 5.0e-5
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  context_length: 256
+  precision: bf16
+
+evaluation:
+  decoding: greedy
+  temperature: 0.0
+  primary_metric: exact_match
+
+preflight:
+  relational_hops: [1, 2, 3]
+  generic_relational_skill_training: conditional_if_needed
+  qa_examples_range:
+    minimum: 10000
+    maximum: 20000
+
+layer_study:
+  enabled: false
+  layers: [6, 9, 12]
