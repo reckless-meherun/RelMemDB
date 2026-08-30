@@ -44,21 +44,44 @@ def build_baseline_example(seed: int, hop: int, index: int) -> dict[str, Any]:
     if index < 0:
         raise ValueError("example index must be non-negative")
 
+    # Positions are ordered E3, E2, E1, E0 so following ``previous`` advances
+    # one position. Every hop sees the same complete four-entity world shape.
     entities = [
         f"pf_ent_{_digest(seed, PREFLIGHT_NAMESPACE, hop, index, 'entity', pos)[:20]}"
-        for pos in range(hop + 1)
+        for pos in range(4)
     ]
-    value = f"pf_val_{_digest(seed, PREFLIGHT_NAMESPACE, hop, index, 'value')[:20]}"
-    facts = [
-        f"The entity immediately previous to entity {source} is {target}."
-        for source, target in zip(entities, entities[1:])
+    values = [
+        f"pf_val_{_digest(seed, PREFLIGHT_NAMESPACE, hop, index, 'value', pos)[:20]}"
+        for pos in range(4)
     ]
-    facts.append(f"attribute_0 of entity {entities[-1]} is {value}.")
+    labeled_facts = [
+        *[
+            (
+                f"relation_{pos}",
+                f"The entity immediately previous to entity {source} is {target}.",
+            )
+            for pos, (source, target) in enumerate(zip(entities, entities[1:]))
+        ],
+        *[
+            (f"attribute_{pos}", f"attribute_0 of entity {entity} is {value}.")
+            for pos, (entity, value) in enumerate(zip(entities, values))
+        ],
+    ]
+    # Fact-order keys deliberately omit the hop and fact content: the same
+    # seed/index permutation applies to H1, H2, and H3 and cannot encode which
+    # attribute is the answer.
+    labeled_facts.sort(
+        key=lambda item: (
+            _digest(seed, PREFLIGHT_NAMESPACE, index, "fact_order", item[0]),
+            item[0],
+        )
+    )
+    facts = [fact for _, fact in labeled_facts]
     semantic = {
         "hop": hop,
         "facts": facts,
         "question": QUESTION_TEMPLATES[hop].format(entity=entities[0]),
-        "answer": value,
+        "answer": values[hop],
     }
     return {"id": _semantic_id(semantic), **semantic}
 

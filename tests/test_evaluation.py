@@ -25,14 +25,19 @@ def dataset() -> dict[int, list[dict]]:
 
 def test_baseline_generation_is_byte_deterministic(dataset) -> None:
     again = generate_baseline_dataset(2025, 200)
-    assert deterministic_json_bytes(dataset[1], jsonl=True) == deterministic_json_bytes(
-        again[1], jsonl=True
-    )
+    for hop in (1, 2, 3):
+        assert deterministic_json_bytes(
+            dataset[hop], jsonl=True
+        ) == deterministic_json_bytes(again[hop], jsonl=True)
+        assert all(
+            row["facts"] == repeated["facts"]
+            for row, repeated in zip(dataset[hop], again[hop], strict=True)
+        )
 
 
 def test_exact_counts_and_fact_counts(dataset) -> None:
     assert {hop: len(rows) for hop, rows in dataset.items()} == {1: 200, 2: 200, 3: 200}
-    assert all(len(row["facts"]) == hop + 1 for hop, rows in dataset.items() for row in rows)
+    assert all(len(row["facts"]) == 7 for rows in dataset.values() for row in rows)
 
 
 def test_context_is_exact_chain_and_answer_is_correct(dataset) -> None:
@@ -46,18 +51,45 @@ def test_context_is_exact_chain_and_answer_is_correct(dataset) -> None:
     )
     for hop, rows in dataset.items():
         for row in rows:
-            links = [relation.fullmatch(fact) for fact in row["facts"][:-1]]
-            assert all(links)
-            for left, right in zip(links, links[1:]):
-                assert left.group(2) == right.group(1)
-            final = attribute.fullmatch(row["facts"][-1])
-            assert final
-            assert links[-1].group(2) == final.group(1)
-            assert row["answer"] == final.group(2)
-            assert row["question"].startswith(
-                f"Starting from entity {links[0].group(1)},"
-            )
+            relation_matches = [
+                match for fact in row["facts"] if (match := relation.fullmatch(fact))
+            ]
+            attribute_matches = [
+                match for fact in row["facts"] if (match := attribute.fullmatch(fact))
+            ]
+            assert len(relation_matches) == 3
+            assert len(attribute_matches) == 4
+            assert len(relation_matches) + len(attribute_matches) == len(row["facts"])
+
+            previous = {match.group(1): match.group(2) for match in relation_matches}
+            attributes = {match.group(1): match.group(2) for match in attribute_matches}
+            assert len(previous) == 3
+            assert len(attributes) == 4
+            assert len(set(attributes.values())) == 4
+
+            source_match = re.match(r"^Starting from entity (pf_ent_[0-9a-f]{20}),", row["question"])
+            assert source_match
+            reached = source_match.group(1)
+            assert reached in previous
+            for _ in range(hop):
+                reached = previous[reached]
+            assert row["answer"] == attributes[reached]
+            assert sum(value != row["answer"] for value in attributes.values()) == 3
             assert row["hop"] == hop
+
+
+def test_answer_attribute_is_not_always_last(dataset) -> None:
+    answer_positions = []
+    for rows in dataset.values():
+        for row in rows:
+            answer_fact = next(
+                fact
+                for fact in row["facts"]
+                if fact.endswith(f"is {row['answer']}.")
+            )
+            answer_positions.append(row["facts"].index(answer_fact))
+    assert len(set(answer_positions)) > 1
+    assert any(position != 6 for position in answer_positions)
 
 
 def test_namespace_and_ids_are_distinct_unique_and_deterministic(dataset) -> None:
