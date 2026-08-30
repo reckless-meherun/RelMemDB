@@ -1,0 +1,38 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local Conda environment, only if accidentally created inside repo
+.conda/
+conda-meta/
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model files
+models/base_models/*
+!models/base_models/.gitkeep
+
+models/trained_models/*
+!models/trained_models/.gitkeep
+
+# Training/run artifacts
+runs/
+
+# Common model checkpoint files
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# SQLite temporary files
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
