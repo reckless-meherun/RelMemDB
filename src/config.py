@@ -101,6 +101,9 @@ def validate_config(config: dict[str, Any]) -> None:
     optional_n40k = _require_mapping(
         _required(data, "optional_n40k", "data"), "data.optional_n40k"
     )
+    master_world = _require_mapping(
+        _required(data, "master_world", "data"), "data.master_world"
+    )
     t_sweep_fact_count = _require_positive_int(
         _required(t_sweep, "fact_count", "data.t_sweep"),
         "data.t_sweep.fact_count",
@@ -119,7 +122,9 @@ def validate_config(config: dict[str, Any]) -> None:
         "data.n_sweep.fact_counts",
         allow_zero=False,
     )
-    _require_int_list(_required(data, "hops", "data"), "data.hops", allow_zero=True)
+    hops = _require_int_list(
+        _required(data, "hops", "data"), "data.hops", allow_zero=True
+    )
     for key in ("same_master_world", "nested_n_subsets", "reuse_t8_n10k"):
         _require_bool(_required(data, key, "data"), f"data.{key}")
     topology = _required(data, "schema_topology", "data")
@@ -129,10 +134,45 @@ def validate_config(config: dict[str, Any]) -> None:
         _required(optional_n40k, "enabled", "data.optional_n40k"),
         "data.optional_n40k.enabled",
     )
-    _require_positive_int(
+    optional_fact_count = _require_positive_int(
         _required(optional_n40k, "fact_count", "data.optional_n40k"),
         "data.optional_n40k.fact_count",
     )
+    latent_positions = _require_positive_int(
+        _required(master_world, "latent_positions", "data.master_world"),
+        "data.master_world.latent_positions",
+    )
+    atomic_facts_per_chain = _require_positive_int(
+        _required(master_world, "atomic_facts_per_chain", "data.master_world"),
+        "data.master_world.atomic_facts_per_chain",
+    )
+    largest_table_count = max([*table_counts, n_sweep_table_count])
+    if latent_positions < largest_table_count:
+        raise ConfigError(
+            "data.master_world.latent_positions must be at least the largest "
+            "configured table count"
+        )
+    relation_facts_per_chain = latent_positions - 1
+    attribute_facts_per_chain = (
+        atomic_facts_per_chain - latent_positions - relation_facts_per_chain
+    )
+    if attribute_facts_per_chain < 1:
+        raise ConfigError(
+            "data.master_world.atomic_facts_per_chain must leave room for at least "
+            "one attribute fact after entity identifiers and adjacent relations"
+        )
+    if attribute_facts_per_chain < latent_positions:
+        raise ConfigError(
+            "data.master_world.atomic_facts_per_chain must provide at least one "
+            "attribute fact per latent position"
+        )
+    configured_fact_counts = [t_sweep_fact_count, *fact_counts, optional_fact_count]
+    for fact_count in configured_fact_counts:
+        if fact_count % atomic_facts_per_chain != 0:
+            raise ConfigError(
+                f"configured fact count {fact_count} must be exactly divisible by "
+                "data.master_world.atomic_facts_per_chain"
+            )
 
     if data["reuse_t8_n10k"]:
         if t_sweep_fact_count != 10_000:
@@ -196,11 +236,15 @@ def validate_config(config: dict[str, Any]) -> None:
     if temperature < 0:
         raise ConfigError("evaluation.temperature must be non-negative")
 
-    _require_int_list(
+    preflight_hops = _require_int_list(
         _required(preflight, "relational_hops", "preflight"),
         "preflight.relational_hops",
         allow_zero=False,
     )
+    if latent_positions < max([*hops, *preflight_hops]) + 1:
+        raise ConfigError(
+            "data.master_world.latent_positions must support the largest requested hop"
+        )
     skill_training = _required(
         preflight, "generic_relational_skill_training", "preflight"
     )
