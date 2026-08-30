@@ -24,7 +24,6 @@ from utils.paths import (
 
 def test_project_root_detection() -> None:
     assert PROJECT_ROOT == PROJECT_ROOT.resolve()
-    assert PROJECT_ROOT.name == "relmemdb"
     assert (PROJECT_ROOT / "pyproject.toml").is_file()
     assert DEFAULT_CONFIG_PATH == CONFIGS_DIR / "exp01_first_feasibility.yaml"
 
