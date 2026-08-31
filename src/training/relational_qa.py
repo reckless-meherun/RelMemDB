@@ -1,4 +1,4 @@
-"""Deterministic Step 6A data, prompts, scoring, and GPT-2 inference."""
+"""Deterministic Step 6A/6B relational data, scoring, and GPT-2 training."""
 
 from __future__ import annotations
 
@@ -6,11 +6,14 @@ import hashlib
 import json
 import random
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Iterable
 
 
 PREFLIGHT_NAMESPACE = "preflight_baseline_v1"
+SKILL_TRAIN_NAMESPACE = "relational_skill_train_v1"
+SKILL_VALIDATION_NAMESPACE = "relational_skill_validation_v1"
 MODEL_ID = "gpt2"
 QUESTION_TEMPLATES = {
     1: (
@@ -118,6 +121,213 @@ def generate_baseline_dataset(
                 raise ValueError(f"opaque identifier collision in baseline: {collision}")
             seen_identifiers.update(identifiers)
     return dataset
+
+
+def _skill_suffix(
+    seed: int, namespace: str, kind: str, ordinal: int
+) -> str:
+    """Injectively obscure an ordinal as three GPT-2-friendly digit tokens."""
+    modulus = 421**3
+    if not 0 <= ordinal < modulus:
+        raise ValueError("skill identifier ordinal is outside the supported domain")
+    multiplier = int(_digest(seed, namespace, kind, "multiplier"), 16) % modulus
+    if multiplier % 421 == 0:
+        multiplier = (multiplier + 1) % modulus
+    offset = int(_digest(seed, namespace, kind, "offset"), 16) % modulus
+    value = (multiplier * ordinal + offset) % modulus
+    chunks: list[str] = []
+    for _ in range(3):
+        chunks.append(f"{100 + value % 421:03d}")
+        value //= 421
+    return "".join(chunks)
+
+
+def build_skill_example(
+    seed: int, split: str, hop: int, index: int
+) -> dict[str, Any]:
+    if split not in ("train", "validation"):
+        raise ValueError(f"unsupported skill split: {split}")
+    if hop not in QUESTION_TEMPLATES:
+        raise ValueError(f"unsupported skill hop: {hop}")
+    if index < 0:
+        raise ValueError("example index must be non-negative")
+    prefix = "skilltr" if split == "train" else "skillval"
+    namespace = (
+        SKILL_TRAIN_NAMESPACE if split == "train" else SKILL_VALIDATION_NAMESPACE
+    )
+    base_ordinal = (hop - 1) * 1_000_000 + index * 4
+    entities = [
+        f"{prefix}_ent_{_skill_suffix(seed, namespace, 'entity', base_ordinal + pos)}"
+        for pos in range(4)
+    ]
+    values = [
+        f"{prefix}_val_{_skill_suffix(seed, namespace, 'value', base_ordinal + pos)}"
+        for pos in range(4)
+    ]
+    labeled_facts = [
+        *[
+            (f"relation_{pos}", f"Previous entity of {source} is {target}.")
+            for pos, (source, target) in enumerate(zip(entities, entities[1:]))
+        ],
+        *[
+            (f"attribute_{pos}", f"attribute_0 of entity {entity} is {value}.")
+            for pos, (entity, value) in enumerate(zip(entities, values))
+        ],
+    ]
+    labeled_facts.sort(
+        key=lambda item: (
+            _digest(seed, namespace, index, "fact_order", item[0]), item[0]
+        )
+    )
+    semantic = {
+        "split": split,
+        "hop": hop,
+        "facts": [fact for _, fact in labeled_facts],
+        "question": QUESTION_TEMPLATES[hop].format(entity=entities[0]),
+        "answer": values[hop],
+    }
+    record_id = hashlib.sha256(
+        json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {"id": f"{prefix}_{record_id}", **semantic}
+
+
+def _example_identifiers(example: dict[str, Any]) -> set[str]:
+    return set(
+        re.findall(
+            r"\b(?:pf_(?:ent|val)_[0-9a-f]{12}|"
+            r"(?:skilltr|skillval)_(?:ent|val)_[0-9]{9})\b",
+            "\n".join(example["facts"]),
+        )
+    )
+
+
+def generate_skill_dataset(
+    seed: int,
+    train_examples_per_hop: int,
+    validation_examples_per_hop: int,
+    hops: Iterable[int] = (1, 2, 3),
+) -> dict[str, dict[int, list[dict[str, Any]]]]:
+    if train_examples_per_hop <= 0 or validation_examples_per_hop <= 0:
+        raise ValueError("skill split sizes must be positive")
+    counts = {
+        "train": train_examples_per_hop,
+        "validation": validation_examples_per_hop,
+    }
+    dataset = {
+        split: {
+            hop: [build_skill_example(seed, split, hop, i) for i in range(count)]
+            for hop in hops
+        }
+        for split, count in counts.items()
+    }
+    seen: set[str] = set()
+    for split in ("train", "validation"):
+        for rows in dataset[split].values():
+            for row in rows:
+                identifiers = _example_identifiers(row)
+                if len(identifiers) != 8:
+                    raise ValueError(f"identifier collision in skill example {row['id']}")
+                collision = seen.intersection(identifiers)
+                if collision:
+                    raise ValueError(
+                        f"identifier collision in skill dataset: {min(collision)}"
+                    )
+                seen.update(identifiers)
+    return dataset
+
+
+def verify_skill_isolation(
+    skill_dataset: dict[str, dict[int, list[dict[str, Any]]]],
+    baseline_dataset: dict[int, list[dict[str, Any]]],
+    target_world_path: Path,
+) -> dict[str, Any]:
+    sets = {
+        split: set().union(
+            *(
+                _example_identifiers(row)
+                for rows in skill_dataset[split].values()
+                for row in rows
+            )
+        )
+        for split in ("train", "validation")
+    }
+    baseline = set().union(
+        *(
+            _example_identifiers(row)
+            for rows in baseline_dataset.values()
+            for row in rows
+        )
+    )
+    target = set(
+        re.findall(
+            r"\b(?:e|v)_[0-9a-f]{32}\b",
+            target_world_path.read_text(encoding="utf-8"),
+        )
+    )
+    checks = {
+        "train_validation_overlap": len(sets["train"] & sets["validation"]),
+        "train_baseline_overlap": len(sets["train"] & baseline),
+        "validation_baseline_overlap": len(sets["validation"] & baseline),
+        "skill_target_overlap": len((sets["train"] | sets["validation"]) & target),
+    }
+    if any(checks.values()):
+        raise ValueError(f"skill dataset isolation failure: {checks}")
+    if not all(token.startswith("skilltr_") for token in sets["train"]):
+        raise ValueError("training identifiers escaped the skilltr namespace")
+    if not all(token.startswith("skillval_") for token in sets["validation"]):
+        raise ValueError("validation identifiers escaped the skillval namespace")
+    checks.update(
+        {
+            "train_identifier_count": len(sets["train"]),
+            "validation_identifier_count": len(sets["validation"]),
+            "baseline_identifier_count": len(baseline),
+            "target_identifier_count": len(target),
+            "verified": True,
+        }
+    )
+    return checks
+
+
+def write_skill_dataset(
+    output_dir: Path,
+    dataset: dict[str, dict[int, list[dict[str, Any]]]],
+    seed: int,
+    isolation: dict[str, Any],
+    maximum_prompt_tokens: int,
+    maximum_sequence_tokens: int,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, Any] = {}
+    for split, filename in (("train", "train.jsonl"), ("validation", "val.jsonl")):
+        rows = [row for hop in sorted(dataset[split]) for row in dataset[split][hop]]
+        payload = deterministic_json_bytes(rows, jsonl=True)
+        (output_dir / filename).write_bytes(payload)
+        files[filename] = {
+            "examples": len(rows),
+            "per_hop": {
+                f"H{hop}": len(dataset[split][hop]) for hop in sorted(dataset[split])
+            },
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    manifest = {
+        "dataset": "generic_relational_skill_v1",
+        "seed": seed,
+        "namespaces": {
+            "train": SKILL_TRAIN_NAMESPACE,
+            "validation": SKILL_VALIDATION_NAMESPACE,
+        },
+        "total_examples": sum(item["examples"] for item in files.values()),
+        "maximum_prompt_tokens": maximum_prompt_tokens,
+        "maximum_supervised_sequence_tokens": maximum_sequence_tokens,
+        "files": files,
+        "isolation": isolation,
+        "step6a_baseline_used_for_training": False,
+        "step6a_baseline_used_for_model_selection": False,
+        "target_database_facts_used": False,
+    }
+    (output_dir / "manifest.json").write_bytes(deterministic_json_bytes(manifest))
+    return manifest
 
 
 def format_relational_prompt(example: dict[str, Any]) -> str:
@@ -297,7 +507,13 @@ def generate_continuations(
         batch = prompts[start : start + batch_size]
         encoded = tokenizer(batch, return_tensors="pt", padding=True)
         encoded = {key: value.to(device) for key, value in encoded.items()}
-        with torch.inference_mode():
+        use_bf16 = device.type == "cuda" and torch.cuda.is_bf16_supported()
+        autocast = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if use_bf16
+            else nullcontext()
+        )
+        with torch.inference_mode(), autocast:
             outputs = model.generate(
                 **encoded,
                 max_new_tokens=max_new_tokens,
@@ -325,3 +541,285 @@ def validate_prompt_lengths(
             f"preflight prompt length {maximum} exceeds maximum {max_input_length}"
         )
     return lengths
+
+
+def encode_supervised_example(
+    example: dict[str, Any], tokenizer: Any, max_length: int
+) -> dict[str, list[int]]:
+    """Encode answer-only causal-LM supervision, including supervised EOS."""
+    prompt_ids = tokenizer.encode(
+        format_relational_prompt(example), add_special_tokens=False
+    )
+    answer_ids = tokenizer.encode(example["answer"], add_special_tokens=False)
+    if tokenizer.eos_token_id is None:
+        raise ValueError("tokenizer must define an EOS token")
+    input_ids = [*prompt_ids, *answer_ids, tokenizer.eos_token_id]
+    if len(input_ids) > max_length:
+        raise ValueError(
+            f"supervised sequence length {len(input_ids)} exceeds maximum {max_length}"
+        )
+    return {
+        "input_ids": input_ids,
+        "attention_mask": [1] * len(input_ids),
+        "labels": [-100] * len(prompt_ids) + [*answer_ids, tokenizer.eos_token_id],
+        "prompt_length": len(prompt_ids),
+    }
+
+
+def collate_supervised(
+    examples: list[dict[str, list[int]]], pad_token_id: int
+) -> dict[str, Any]:
+    import torch
+
+    width = max(len(example["input_ids"]) for example in examples)
+    input_ids = []
+    attention_masks = []
+    labels = []
+    for example in examples:
+        padding = width - len(example["input_ids"])
+        input_ids.append(example["input_ids"] + [pad_token_id] * padding)
+        attention_masks.append(example["attention_mask"] + [0] * padding)
+        labels.append(example["labels"] + [-100] * padding)
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
+
+
+def select_best_epoch(epoch_records: list[dict[str, Any]]) -> dict[str, Any]:
+    if not epoch_records:
+        raise ValueError("at least one epoch record is required")
+    return max(
+        epoch_records,
+        key=lambda row: (
+            row["validation_overall_strict_em"],
+            -row["validation_loss"],
+            -row["epoch"],
+        ),
+    )
+
+
+def post_skill_decision(
+    per_hop_strict_em: dict[int, float], threshold: float
+) -> str:
+    return (
+        "relational_skill_ready"
+        if all(per_hop_strict_em.get(hop, 0.0) >= threshold for hop in (1, 2, 3))
+        else "stop_and_diagnose"
+    )
+
+
+def _validation_loss(
+    model: Any,
+    encoded_rows: list[dict[str, list[int]]],
+    tokenizer: Any,
+    device: Any,
+    batch_size: int,
+) -> float:
+    import torch
+    from torch.utils.data import DataLoader
+
+    loader = DataLoader(
+        encoded_rows,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=lambda batch: collate_supervised(batch, tokenizer.pad_token_id),
+    )
+    weighted_loss = 0.0
+    supervised_tokens = 0
+    model.eval()
+    with torch.inference_mode():
+        for batch in loader:
+            batch = {key: value.to(device) for key, value in batch.items()}
+            use_bf16 = device.type == "cuda" and torch.cuda.is_bf16_supported()
+            autocast = (
+                torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+                if use_bf16
+                else nullcontext()
+            )
+            with autocast:
+                output = model(**batch)
+            token_count = int((batch["labels"][:, 1:] != -100).sum().item())
+            weighted_loss += float(output.loss.item()) * token_count
+            supervised_tokens += token_count
+    return weighted_loss / supervised_tokens
+
+
+def _validation_exact_match(
+    model: Any,
+    tokenizer: Any,
+    device: Any,
+    rows_by_hop: dict[int, list[dict[str, Any]]],
+    max_input_length: int,
+    max_new_tokens: int,
+    batch_size: int,
+) -> dict[int, float]:
+    previous_cache_setting = model.config.use_cache
+    model.config.use_cache = True
+    model.eval()
+    scores: dict[int, float] = {}
+    for hop in sorted(rows_by_hop):
+        rows = rows_by_hop[hop]
+        continuations = generate_continuations(
+            [format_relational_prompt(row) for row in rows],
+            model,
+            tokenizer,
+            device,
+            max_input_length,
+            max_new_tokens,
+            batch_size=batch_size,
+        )
+        scores[hop] = sum(
+            first_generated_line(continuation) == row["answer"]
+            for row, continuation in zip(rows, continuations, strict=True)
+        ) / len(rows)
+    model.config.use_cache = previous_cache_setting
+    return scores
+
+
+def train_relational_skill(
+    model: Any,
+    tokenizer: Any,
+    device: Any,
+    train_rows: list[dict[str, Any]],
+    validation_rows_by_hop: dict[int, list[dict[str, Any]]],
+    config: dict[str, Any],
+    checkpoint_dir: Path,
+    max_new_tokens: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Train once from base GPT-2 and save the validation-selected checkpoint."""
+    import time
+
+    import torch
+    from torch.utils.data import DataLoader
+    from transformers import get_cosine_schedule_with_warmup
+
+    seed = config["seed"]
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.cuda.reset_peak_memory_stats(device)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    use_bf16 = device.type == "cuda" and torch.cuda.is_bf16_supported()
+    if use_bf16:
+        # Keep master parameters/AdamW state in FP32 while using BF16 forward
+        # and backward computation through native autocast.
+        model.float()
+
+    train_encoded = [
+        encode_supervised_example(row, tokenizer, config["max_length"])
+        for row in train_rows
+    ]
+    validation_rows = [
+        row
+        for hop in sorted(validation_rows_by_hop)
+        for row in validation_rows_by_hop[hop]
+    ]
+    validation_encoded = [
+        encode_supervised_example(row, tokenizer, config["max_length"])
+        for row in validation_rows
+    ]
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config["learning_rate"],
+        weight_decay=config["weight_decay"],
+    )
+    steps_per_epoch = (len(train_encoded) + config["batch_size"] - 1) // config[
+        "batch_size"
+    ]
+    total_steps = steps_per_epoch * config["epochs"]
+    warmup_steps = int(total_steps * config["warmup_ratio"])
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+    )
+    model.config.use_cache = False
+    records: list[dict[str, Any]] = []
+    best: dict[str, Any] | None = None
+    started = time.perf_counter()
+    for epoch in range(1, config["epochs"] + 1):
+        generator = torch.Generator().manual_seed(seed + epoch)
+        loader = DataLoader(
+            train_encoded,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            generator=generator,
+            collate_fn=lambda batch: collate_supervised(batch, tokenizer.pad_token_id),
+        )
+        model.train()
+        weighted_loss = 0.0
+        supervised_tokens = 0
+        for batch in loader:
+            batch = {key: value.to(device) for key, value in batch.items()}
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast(
+                device_type=device.type, dtype=torch.bfloat16, enabled=use_bf16
+            ):
+                output = model(**batch)
+            output.loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config["max_grad_norm"])
+            optimizer.step()
+            scheduler.step()
+            token_count = int((batch["labels"][:, 1:] != -100).sum().item())
+            weighted_loss += float(output.loss.item()) * token_count
+            supervised_tokens += token_count
+        validation_loss = _validation_loss(
+            model,
+            validation_encoded,
+            tokenizer,
+            device,
+            config["batch_size"],
+        )
+        hop_scores = _validation_exact_match(
+            model,
+            tokenizer,
+            device,
+            validation_rows_by_hop,
+            config["max_length"],
+            max_new_tokens,
+            config["batch_size"],
+        )
+        record = {
+            "epoch": epoch,
+            "train_loss": weighted_loss / supervised_tokens,
+            "validation_loss": validation_loss,
+            **{f"validation_H{hop}_strict_em": hop_scores[hop] for hop in (1, 2, 3)},
+            "validation_overall_strict_em": sum(hop_scores.values()) / len(hop_scores),
+            "elapsed_seconds": time.perf_counter() - started,
+        }
+        records.append(record)
+        if best is None or select_best_epoch([best, record]) is record:
+            best = record
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            model.save_pretrained(checkpoint_dir, safe_serialization=True)
+            tokenizer.save_pretrained(checkpoint_dir)
+        print(
+            f"Epoch {epoch}: train_loss={record['train_loss']:.6f} "
+            f"val_loss={validation_loss:.6f} "
+            f"H1={hop_scores[1]:.4f} H2={hop_scores[2]:.4f} "
+            f"H3={hop_scores[3]:.4f} "
+            f"overall={record['validation_overall_strict_em']:.4f}",
+            flush=True,
+        )
+    assert best is not None
+    summary = {
+        "selected_epoch": best["epoch"],
+        "runtime_seconds": time.perf_counter() - started,
+        "peak_gpu_memory_bytes": (
+            int(torch.cuda.max_memory_allocated(device))
+            if device.type == "cuda"
+            else 0
+        ),
+        "total_optimizer_steps": total_steps,
+        "warmup_steps": warmup_steps,
+        "precision": "bfloat16" if use_bf16 else "float32",
+        "step6a_baseline_used_for_training": False,
+        "step6a_baseline_used_for_model_selection": False,
+        "target_database_facts_used": False,
+    }
+    (checkpoint_dir / "training_metadata.json").write_bytes(
+        deterministic_json_bytes({"configuration": config, "epochs": records, **summary})
+    )
+    return records, summary

@@ -1,0 +1,20 @@
+experiment: exp01_first_feasibility
+seed: 2025
+base_model_path: models/base_models/gpt2
+checkpoint_path: models/trained_models/gpt2_relational_skill
+precision: bfloat16
+training:
+  train_examples_per_hop: 5000
+  validation_examples_per_hop: 1000
+  epochs: 3
+  batch_size: 32
+  optimizer: AdamW
+  learning_rate: 5.0e-05
+  weight_decay: 0.01
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  max_length: 256
+  seed: 2025
+dataset_manifest_sha256: 37b50dc139f915832fb3f1c17e4af6791dcf1726f60a9d6078f9426f253844ea
+target_database_facts_used: false

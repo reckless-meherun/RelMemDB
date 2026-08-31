@@ -1,0 +1,45 @@
+{
+  "dataset": "generic_relational_skill_v1",
+  "files": {
+    "train.jsonl": {
+      "examples": 15000,
+      "per_hop": {
+        "H1": 5000,
+        "H2": 5000,
+        "H3": 5000
+      },
+      "sha256": "155d0dce14cae79808df262ed4b4f056f2484bd8a9e1506ec01fcc03de881525"
+    },
+    "val.jsonl": {
+      "examples": 3000,
+      "per_hop": {
+        "H1": 1000,
+        "H2": 1000,
+        "H3": 1000
+      },
+      "sha256": "0ce5c772a344ce447c5d437b1aba5da1988fb86b89dbc2cf1fd9e487ddee9b22"
+    }
+  },
+  "isolation": {
+    "baseline_identifier_count": 4800,
+    "skill_target_overlap": 0,
+    "target_identifier_count": 29000,
+    "train_baseline_overlap": 0,
+    "train_identifier_count": 120000,
+    "train_validation_overlap": 0,
+    "validation_baseline_overlap": 0,
+    "validation_identifier_count": 24000,
+    "verified": true
+  },
+  "maximum_prompt_tokens": 220,
+  "maximum_supervised_sequence_tokens": 230,
+  "namespaces": {
+    "train": "relational_skill_train_v1",
+    "validation": "relational_skill_validation_v1"
+  },
+  "seed": 2025,
+  "step6a_baseline_used_for_model_selection": false,
+  "step6a_baseline_used_for_training": false,
+  "target_database_facts_used": false,
+  "total_examples": 18000
+}
