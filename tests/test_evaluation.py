@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import inspect
 import re
 from pathlib import Path
@@ -9,8 +10,11 @@ import pytest
 
 from training.relational_qa import (
     PREFLIGHT_NAMESPACE,
+    SKILL_TRAIN_NAMESPACE,
+    SKILL_VALIDATION_NAMESPACE,
     answer_prefix_match,
     build_skill_example,
+    classify_candidate_prediction,
     deterministic_json_bytes,
     encode_supervised_example,
     format_copy_prompt,
@@ -24,6 +28,7 @@ from training.relational_qa import (
     summarize_predictions,
     train_relational_skill,
     validate_prompt_lengths,
+    visible_attribute_values,
     verify_skill_isolation,
 )
 
@@ -42,8 +47,14 @@ def dataset() -> dict[int, list[dict]]:
 
 
 @pytest.fixture(scope="module")
-def skill_dataset() -> dict[str, dict[int, list[dict]]]:
-    return generate_skill_dataset(2025, 5000, 1000)
+def gpt2_tokenizer():
+    transformers = pytest.importorskip("transformers")
+    return transformers.AutoTokenizer.from_pretrained(BASE_MODEL_DIR)
+
+
+@pytest.fixture(scope="module")
+def skill_dataset(gpt2_tokenizer) -> dict[str, dict[int, list[dict]]]:
+    return generate_skill_dataset(2025, 5000, 1000, gpt2_tokenizer)
 
 
 def test_baseline_generation_is_byte_deterministic(dataset) -> None:
@@ -227,12 +238,12 @@ def test_skill_dataset_counts_are_fixed_and_balanced(skill_dataset) -> None:
 
 def test_skill_examples_have_complete_world_and_correct_answers(skill_dataset) -> None:
     relation = re.compile(
-        r"^Previous entity of ((?:skilltr|skillval)_ent_[0-9]{9}) "
-        r"is ((?:skilltr|skillval)_ent_[0-9]{9})\.$"
+        r"^Previous entity of (pf_ent_[0-9]{12}) "
+        r"is (pf_ent_[0-9]{12})\.$"
     )
     attribute = re.compile(
-        r"^attribute_0 of entity ((?:skilltr|skillval)_ent_[0-9]{9}) "
-        r"is ((?:skilltr|skillval)_val_[0-9]{9})\.$"
+        r"^attribute_0 of entity (pf_ent_[0-9]{12}) "
+        r"is (pf_val_[0-9]{12})\.$"
     )
     for splits in skill_dataset.values():
         for hop, rows in splits.items():
@@ -246,7 +257,7 @@ def test_skill_examples_have_complete_world_and_correct_answers(skill_dataset) -
                 values = {m.group(1): m.group(2) for m in attributes}
                 assert len(set(values.values())) == 4
                 source = re.match(
-                    r"^Starting from entity ((?:skilltr|skillval)_ent_[0-9]{9}),",
+                    r"^Starting from entity (pf_ent_[0-9]{12}),",
                     row["question"],
                 ).group(1)
                 reached = source
@@ -255,14 +266,49 @@ def test_skill_examples_have_complete_world_and_correct_answers(skill_dataset) -
                 assert row["answer"] == values[reached]
 
 
-def test_skill_generation_and_fact_order_are_deterministic() -> None:
-    first = build_skill_example(2025, "train", 2, 17)
-    second = build_skill_example(2025, "train", 2, 17)
+def test_skill_generation_and_fact_order_are_deterministic(gpt2_tokenizer) -> None:
+    first = build_skill_example(2025, "train", 2, 17, gpt2_tokenizer)
+    second = build_skill_example(2025, "train", 2, 17, gpt2_tokenizer)
     assert first == second
     assert first["facts"] == second["facts"]
-    assert deterministic_json_bytes(generate_skill_dataset(2025, 3, 2)) == (
-        deterministic_json_bytes(generate_skill_dataset(2025, 3, 2))
+    assert deterministic_json_bytes(
+        generate_skill_dataset(2025, 3, 2, gpt2_tokenizer)
+    ) == (
+        deterministic_json_bytes(
+            generate_skill_dataset(2025, 3, 2, gpt2_tokenizer)
+        )
     )
+
+
+def test_skill_ids_are_independently_sha_derived_not_ordinal_affine(
+    gpt2_tokenizer,
+) -> None:
+    def suffix(*parts: object) -> str:
+        for nonce in range(10_000):
+            material = "\x1f".join(
+                str(part) for part in (*parts, "candidate", nonce)
+            ).encode()
+            candidate = (
+                f"{int(hashlib.sha256(material).hexdigest(), 16) % 10**12:012d}"
+            )
+            if len(gpt2_tokenizer.encode(candidate, add_special_tokens=False)) <= 5:
+                return candidate
+        raise AssertionError("test rejection sampling failed")
+
+    example = build_skill_example(2025, "train", 2, 17, gpt2_tokenizer)
+    expected_source = (
+        "pf_ent_"
+        + suffix(2025, SKILL_TRAIN_NAMESPACE, 2, 17, "entity", 0)
+    )
+    expected_answer = (
+        "pf_val_"
+        + suffix(2025, SKILL_TRAIN_NAMESPACE, 2, 17, "value", 2)
+    )
+    assert example["question"].startswith(f"Starting from entity {expected_source},")
+    assert example["answer"] == expected_answer
+    source = inspect.getsource(build_skill_example)
+    assert "_independent_skill_suffix" in source
+    assert "ordinal" not in source
 
 
 def test_skill_namespaces_are_fully_disjoint(skill_dataset, dataset) -> None:
@@ -275,8 +321,23 @@ def test_skill_namespaces_are_fully_disjoint(skill_dataset, dataset) -> None:
         [row for split in skill_dataset.values() for rows in split.values() for row in rows],
         jsonl=True,
     ).decode()
-    assert "pf_ent_" not in serialized and "pf_val_" not in serialized
+    assert "pf_ent_" in serialized and "pf_val_" in serialized
+    assert "skilltr_" not in serialized and "skillval_" not in serialized
     assert not re.search(r'\b[ev]_[0-9a-f]{32}\b', serialized)
+
+
+def test_hidden_v2_namespaces_never_appear_in_prompts(skill_dataset) -> None:
+    assert SKILL_TRAIN_NAMESPACE == "relational_skill_train_v2"
+    assert SKILL_VALIDATION_NAMESPACE == "relational_skill_validation_v2"
+    prompts = [
+        format_relational_prompt(row)
+        for split in skill_dataset.values()
+        for rows in split.values()
+        for row in rows
+    ]
+    assert all(SKILL_TRAIN_NAMESPACE not in prompt for prompt in prompts)
+    assert all(SKILL_VALIDATION_NAMESPACE not in prompt for prompt in prompts)
+    assert all("skilltr_" not in prompt and "skillval_" not in prompt for prompt in prompts)
 
 
 class _StubTokenizer:
@@ -287,8 +348,8 @@ class _StubTokenizer:
         return [ord(character) for character in text]
 
 
-def test_answer_only_supervised_labels() -> None:
-    example = build_skill_example(2025, "train", 1, 0)
+def test_answer_only_supervised_labels(gpt2_tokenizer) -> None:
+    example = build_skill_example(2025, "train", 1, 0, gpt2_tokenizer)
     tokenizer = _StubTokenizer()
     encoded = encode_supervised_example(example, tokenizer, 2000)
     prompt_length = encoded["prompt_length"]
@@ -333,6 +394,30 @@ def test_step6a_baseline_is_not_a_training_or_selection_input() -> None:
     parameters = inspect.signature(train_relational_skill).parameters
     assert "baseline_dataset" not in parameters
     assert "baseline_rows" not in parameters
+
+
+def test_candidate_classification_diagnostics(gpt2_tokenizer) -> None:
+    example = build_skill_example(2025, "validation", 2, 3, gpt2_tokenizer)
+    candidates = visible_attribute_values(example)
+    wrong_candidate = next(value for value in candidates if value != example["answer"])
+    assert classify_candidate_prediction(example, example["answer"]) == "exact_correct"
+    assert classify_candidate_prediction(example, wrong_candidate) == (
+        "wrong_visible_candidate"
+    )
+    assert classify_candidate_prediction(example, "pf_val_999999999999") == (
+        "non_candidate_generation"
+    )
+    records = {
+        2: [
+            make_prediction_record(example, example["answer"], "copy-failure"),
+            make_prediction_record(example, wrong_candidate, "copy-failure"),
+            make_prediction_record(example, "not-a-candidate", "copy-failure"),
+        ]
+    }
+    metrics = summarize_predictions(records, 0.90, 0.95)["per_hop"]["H2"]
+    assert metrics["exact_correct_rate"] == pytest.approx(1 / 3)
+    assert metrics["wrong_visible_candidate_rate"] == pytest.approx(1 / 3)
+    assert metrics["non_candidate_generation_rate"] == pytest.approx(1 / 3)
 
 
 def test_post_skill_decision_ignores_copy_control() -> None:

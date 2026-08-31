@@ -16,5 +16,5 @@ training:
   max_grad_norm: 1.0
   max_length: 256
   seed: 2025
-dataset_manifest_sha256: 37b50dc139f915832fb3f1c17e4af6791dcf1726f60a9d6078f9426f253844ea
+dataset_manifest_sha256: 2d43638daec6998841dd3f3572c788c90d04d881e8a677958fc693892ffa98d7
 target_database_facts_used: false

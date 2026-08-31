@@ -257,16 +257,17 @@ def _run_train_skill(config: dict) -> dict:
     hops = preflight["relational_hops"]
     baseline_before = _baseline_hashes(hops)
     baseline_dataset = _load_baseline_files(hops)
+    model, tokenizer, device, precision = load_gpt2(BASE_MODEL_DIR)
     skill_dataset = generate_skill_dataset(
         seed,
         skill_config["train_examples_per_hop"],
         skill_config["validation_examples_per_hop"],
+        tokenizer,
         hops,
     )
     isolation = verify_skill_isolation(
         skill_dataset, baseline_dataset, TARGET_WORLD_PATH
     )
-    model, tokenizer, device, precision = load_gpt2(BASE_MODEL_DIR)
     rows_by_split = {
         split: [
             row

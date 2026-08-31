@@ -12,8 +12,8 @@ from typing import Any, Iterable
 
 
 PREFLIGHT_NAMESPACE = "preflight_baseline_v1"
-SKILL_TRAIN_NAMESPACE = "relational_skill_train_v1"
-SKILL_VALIDATION_NAMESPACE = "relational_skill_validation_v1"
+SKILL_TRAIN_NAMESPACE = "relational_skill_train_v2"
+SKILL_VALIDATION_NAMESPACE = "relational_skill_validation_v2"
 MODEL_ID = "gpt2"
 QUESTION_TEMPLATES = {
     1: (
@@ -37,15 +37,24 @@ def _digest(*parts: object) -> str:
 
 
 def _opaque_suffix(*parts: object) -> str:
-    """Render 40 SHA-256-derived bits as 12 token-efficient hex characters."""
-    # Decimal digits are a subset of hexadecimal characters and tokenize much
-    # more compactly in GPT-2 than unconstrained a-f-heavy digest slices.
+    """Render an independently SHA-256-derived value as 12 decimal digits."""
     return f"{int(_digest(*parts), 16) % 10**12:012d}"
 
 
 def _semantic_id(record: dict[str, Any]) -> str:
     semantic = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return f"pf_{hashlib.sha256(semantic.encode('utf-8')).hexdigest()}"
+
+
+def _independent_skill_suffix(
+    tokenizer: Any, *semantic_parts: object, max_suffix_tokens: int = 5
+) -> str:
+    """Independently SHA-derive a compact 12-digit symbol by rejection sampling."""
+    for nonce in range(10_000):
+        suffix = _opaque_suffix(*semantic_parts, "candidate", nonce)
+        if len(tokenizer.encode(suffix, add_special_tokens=False)) <= max_suffix_tokens:
+            return suffix
+    raise ValueError("unable to derive a token-efficient 12-digit skill identifier")
 
 
 def build_baseline_example(seed: int, hop: int, index: int) -> dict[str, Any]:
@@ -123,27 +132,8 @@ def generate_baseline_dataset(
     return dataset
 
 
-def _skill_suffix(
-    seed: int, namespace: str, kind: str, ordinal: int
-) -> str:
-    """Injectively obscure an ordinal as three GPT-2-friendly digit tokens."""
-    modulus = 421**3
-    if not 0 <= ordinal < modulus:
-        raise ValueError("skill identifier ordinal is outside the supported domain")
-    multiplier = int(_digest(seed, namespace, kind, "multiplier"), 16) % modulus
-    if multiplier % 421 == 0:
-        multiplier = (multiplier + 1) % modulus
-    offset = int(_digest(seed, namespace, kind, "offset"), 16) % modulus
-    value = (multiplier * ordinal + offset) % modulus
-    chunks: list[str] = []
-    for _ in range(3):
-        chunks.append(f"{100 + value % 421:03d}")
-        value //= 421
-    return "".join(chunks)
-
-
 def build_skill_example(
-    seed: int, split: str, hop: int, index: int
+    seed: int, split: str, hop: int, index: int, tokenizer: Any
 ) -> dict[str, Any]:
     if split not in ("train", "validation"):
         raise ValueError(f"unsupported skill split: {split}")
@@ -151,17 +141,21 @@ def build_skill_example(
         raise ValueError(f"unsupported skill hop: {hop}")
     if index < 0:
         raise ValueError("example index must be non-negative")
-    prefix = "skilltr" if split == "train" else "skillval"
     namespace = (
         SKILL_TRAIN_NAMESPACE if split == "train" else SKILL_VALIDATION_NAMESPACE
     )
-    base_ordinal = (hop - 1) * 1_000_000 + index * 4
     entities = [
-        f"{prefix}_ent_{_skill_suffix(seed, namespace, 'entity', base_ordinal + pos)}"
+        "pf_ent_"
+        + _independent_skill_suffix(
+            tokenizer, seed, namespace, hop, index, "entity", pos
+        )
         for pos in range(4)
     ]
     values = [
-        f"{prefix}_val_{_skill_suffix(seed, namespace, 'value', base_ordinal + pos)}"
+        "pf_val_"
+        + _independent_skill_suffix(
+            tokenizer, seed, namespace, hop, index, "value", pos
+        )
         for pos in range(4)
     ]
     labeled_facts = [
@@ -189,14 +183,13 @@ def build_skill_example(
     record_id = hashlib.sha256(
         json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    return {"id": f"{prefix}_{record_id}", **semantic}
+    return {"id": f"pf_skill_{record_id}", **semantic}
 
 
 def _example_identifiers(example: dict[str, Any]) -> set[str]:
     return set(
         re.findall(
-            r"\b(?:pf_(?:ent|val)_[0-9a-f]{12}|"
-            r"(?:skilltr|skillval)_(?:ent|val)_[0-9]{9})\b",
+            r"\bpf_(?:ent|val)_[0-9]{12}\b",
             "\n".join(example["facts"]),
         )
     )
@@ -206,6 +199,7 @@ def generate_skill_dataset(
     seed: int,
     train_examples_per_hop: int,
     validation_examples_per_hop: int,
+    tokenizer: Any,
     hops: Iterable[int] = (1, 2, 3),
 ) -> dict[str, dict[int, list[dict[str, Any]]]]:
     if train_examples_per_hop <= 0 or validation_examples_per_hop <= 0:
@@ -216,7 +210,10 @@ def generate_skill_dataset(
     }
     dataset = {
         split: {
-            hop: [build_skill_example(seed, split, hop, i) for i in range(count)]
+            hop: [
+                build_skill_example(seed, split, hop, i, tokenizer)
+                for i in range(count)
+            ]
             for hop in hops
         }
         for split, count in counts.items()
@@ -273,10 +270,12 @@ def verify_skill_isolation(
     }
     if any(checks.values()):
         raise ValueError(f"skill dataset isolation failure: {checks}")
-    if not all(token.startswith("skilltr_") for token in sets["train"]):
-        raise ValueError("training identifiers escaped the skilltr namespace")
-    if not all(token.startswith("skillval_") for token in sets["validation"]):
-        raise ValueError("validation identifiers escaped the skillval namespace")
+    if not all(token.startswith(("pf_ent_", "pf_val_")) for token in sets["train"]):
+        raise ValueError("training identifiers use an invalid surface syntax")
+    if not all(
+        token.startswith(("pf_ent_", "pf_val_")) for token in sets["validation"]
+    ):
+        raise ValueError("validation identifiers use an invalid surface syntax")
     checks.update(
         {
             "train_identifier_count": len(sets["train"]),
@@ -311,7 +310,7 @@ def write_skill_dataset(
             "sha256": hashlib.sha256(payload).hexdigest(),
         }
     manifest = {
-        "dataset": "generic_relational_skill_v1",
+        "dataset": "generic_relational_skill_v2",
         "seed": seed,
         "namespaces": {
             "train": SKILL_TRAIN_NAMESPACE,
@@ -320,6 +319,8 @@ def write_skill_dataset(
         "total_examples": sum(item["examples"] for item in files.values()),
         "maximum_prompt_tokens": maximum_prompt_tokens,
         "maximum_supervised_sequence_tokens": maximum_sequence_tokens,
+        "identifier_surface_syntax": "pf_ent_<12 decimal digits> / pf_val_<12 decimal digits>",
+        "identifier_generation": "independent SHA-256 rejection sampling",
         "files": files,
         "isolation": isolation,
         "step6a_baseline_used_for_training": False,
@@ -356,6 +357,28 @@ def answer_prefix_match(continuation: str, gold_answer: str) -> bool:
     return not remainder or not (remainder[0].isalnum() or remainder[0] == "_")
 
 
+def visible_attribute_values(example: dict[str, Any]) -> set[str]:
+    pattern = re.compile(
+        r"^attribute_0 of entity pf_ent_[0-9]{12} is (pf_val_[0-9]{12})\.$"
+    )
+    values = {
+        match.group(1)
+        for fact in example["facts"]
+        if (match := pattern.fullmatch(fact))
+    }
+    if len(values) != 4:
+        raise ValueError(f"expected four distinct visible values in {example['id']}")
+    return values
+
+
+def classify_candidate_prediction(example: dict[str, Any], prediction: str) -> str:
+    if prediction == example["answer"]:
+        return "exact_correct"
+    if prediction in visible_attribute_values(example):
+        return "wrong_visible_candidate"
+    return "non_candidate_generation"
+
+
 def make_prediction_record(
     example: dict[str, Any], continuation: str, copy_continuation: str
 ) -> dict[str, Any]:
@@ -369,6 +392,7 @@ def make_prediction_record(
         "prediction": prediction,
         "strict_exact_match": strict_exact_match(prediction, gold),
         "answer_prefix_match": answer_prefix_match(continuation, gold),
+        "candidate_classification": classify_candidate_prediction(example, prediction),
         "copy_prediction": copy_prediction,
         "copy_strict_exact_match": strict_exact_match(copy_prediction, gold),
     }
@@ -395,6 +419,15 @@ def summarize_predictions(
                 rows, "copy_strict_exact_match"
             ),
         }
+        if rows and all("candidate_classification" in row for row in rows):
+            for classification, metric_name in (
+                ("exact_correct", "exact_correct_rate"),
+                ("wrong_visible_candidate", "wrong_visible_candidate_rate"),
+                ("non_candidate_generation", "non_candidate_generation_rate"),
+            ):
+                per_hop[f"H{hop}"][metric_name] = sum(
+                    row["candidate_classification"] == classification for row in rows
+                ) / len(rows)
     overall = {
         "num_examples": len(all_rows),
         "strict_exact_match_accuracy": accuracy(all_rows, "strict_exact_match"),
@@ -403,6 +436,15 @@ def summarize_predictions(
             all_rows, "copy_strict_exact_match"
         ),
     }
+    if all_rows and all("candidate_classification" in row for row in all_rows):
+        for classification, metric_name in (
+            ("exact_correct", "exact_correct_rate"),
+            ("wrong_visible_candidate", "wrong_visible_candidate_rate"),
+            ("non_candidate_generation", "non_candidate_generation_rate"),
+        ):
+            overall[metric_name] = sum(
+                row["candidate_classification"] == classification for row in all_rows
+            ) / len(all_rows)
     adequate = all(
         metrics["strict_exact_match_accuracy"] >= strict_threshold
         for metrics in per_hop.values()

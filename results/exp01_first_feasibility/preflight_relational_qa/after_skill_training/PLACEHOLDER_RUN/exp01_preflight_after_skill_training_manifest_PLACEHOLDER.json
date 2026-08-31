@@ -27,7 +27,7 @@
   "device": "cuda",
   "experiment": "exp01_first_feasibility",
   "maximum_prompt_tokens": 248,
-  "metrics_sha256": "b291a698a7037e725262d8ca57f2e8c0e5cf1c0c101bba389e27f0e05bb66707",
+  "metrics_sha256": "75daa8b223e2064899aee3f74d8eab8d65a43e21426972ac87d90326fa8a07d1",
   "mode": "after-skill",
   "model_path": "models/trained_models/gpt2_relational_skill",
   "namespace": "preflight_baseline_v1",
@@ -35,16 +35,16 @@
   "prediction_files": {
     "exp01_preflight_after_skill_training_H1_predictions_PLACEHOLDER.jsonl": {
       "examples": 200,
-      "sha256": "575012cec1692f2f4c5b21cbcf2e0f2955317418c573be9b0d6269df781b0d16"
+      "sha256": "772b2ffe03fc66341cc62bac5da24c6410e2bfdc81e47797c93a1ebf4bbd1421"
     },
     "exp01_preflight_after_skill_training_H2_predictions_PLACEHOLDER.jsonl": {
       "examples": 200,
-      "sha256": "7cd143c44a5566310fad6ab88d8ad430d36ae26ef4b1eb017021cbddc051ceb8"
+      "sha256": "d3604c764b0d706efcf56f26d5ed78cfdfba7280ebbe0268c1f72aaceb36bb2d"
     },
     "exp01_preflight_after_skill_training_H3_predictions_PLACEHOLDER.jsonl": {
       "examples": 200,
-      "sha256": "78a27c2aa6e119aa139e584b25c7b7c482c4fa17b6343b3cc65e6292b25f489f"
+      "sha256": "15ef36e32281816c6fd72d69e526a682eadab573d5cf41fc8a6f659a501594a3"
     }
   },
-  "runtime_seconds": 3.000898191705346
+  "runtime_seconds": 2.9625375540927052
 }
