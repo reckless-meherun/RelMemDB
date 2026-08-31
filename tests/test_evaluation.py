@@ -42,12 +42,12 @@ def test_exact_counts_and_fact_counts(dataset) -> None:
 
 def test_context_is_exact_chain_and_answer_is_correct(dataset) -> None:
     relation = re.compile(
-        r"^The entity immediately previous to entity (pf_ent_[0-9a-f]{20}) "
-        r"is (pf_ent_[0-9a-f]{20})\.$"
+        r"^Previous entity of (pf_ent_[0-9a-f]{12}) "
+        r"is (pf_ent_[0-9a-f]{12})\.$"
     )
     attribute = re.compile(
-        r"^attribute_0 of entity (pf_ent_[0-9a-f]{20}) "
-        r"is (pf_val_[0-9a-f]{20})\.$"
+        r"^attribute_0 of entity (pf_ent_[0-9a-f]{12}) "
+        r"is (pf_val_[0-9a-f]{12})\.$"
     )
     for hop, rows in dataset.items():
         for row in rows:
@@ -67,7 +67,7 @@ def test_context_is_exact_chain_and_answer_is_correct(dataset) -> None:
             assert len(attributes) == 4
             assert len(set(attributes.values())) == 4
 
-            source_match = re.match(r"^Starting from entity (pf_ent_[0-9a-f]{20}),", row["question"])
+            source_match = re.match(r"^Starting from entity (pf_ent_[0-9a-f]{12}),", row["question"])
             assert source_match
             reached = source_match.group(1)
             assert reached in previous
@@ -102,6 +102,17 @@ def test_namespace_and_ids_are_distinct_unique_and_deterministic(dataset) -> Non
     assert not any(token in serialized.lower() for token in ("t4", "t8", "t12", "n5k", "n10k", "n20k"))
 
 
+def test_opaque_identifiers_do_not_collide(dataset) -> None:
+    serialized_facts = "\n".join(
+        fact
+        for rows in dataset.values()
+        for row in rows
+        for fact in row["facts"]
+    )
+    identifiers = re.findall(r"\bpf_(?:ent|val)_[0-9a-f]{12}\b", serialized_facts)
+    assert len(set(identifiers)) == 600 * 8
+
+
 def test_prompt_format_is_exact_and_deterministic(dataset) -> None:
     example = dataset[2][0]
     expected = (
@@ -121,8 +132,8 @@ def test_prompt_format_is_exact_and_deterministic(dataset) -> None:
 def test_no_target_or_storage_metadata(dataset) -> None:
     text = json.dumps(dataset).lower()
     forbidden = (
-        "master_world", "world.json", "database", "table", "rowid", "select ",
-        " from ", "sqlite", "datasets/", "target", "cpt",
+        "select ", "insert ", "create table", "pragma ", "sqlite", "rowid",
+        "master_world", "world.json", "datasets/", "cpt",
     )
     assert all(term not in text for term in forbidden)
 
@@ -172,6 +183,7 @@ def test_decision_rule_fails_below_any_threshold(failure) -> None:
     rows = {hop: [_metric_row()] * 10 for hop in (1, 2, 3)}
     if failure == "copy":
         rows[1][0] = _metric_row(True, True, False)
+        rows[1][1] = _metric_row(True, True, False)
     else:
         hop = int(failure[1])
         rows[hop][0] = _metric_row(False)

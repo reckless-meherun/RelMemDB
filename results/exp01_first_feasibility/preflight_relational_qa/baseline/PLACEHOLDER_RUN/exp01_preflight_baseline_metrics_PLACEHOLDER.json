@@ -1,0 +1,33 @@
+{
+  "decision": "needs_skill_training",
+  "overall": {
+    "copy_control_exact_match_accuracy": 0.0,
+    "num_examples": 600,
+    "prefix_match_accuracy": 0.0,
+    "strict_exact_match_accuracy": 0.0
+  },
+  "per_hop": {
+    "H1": {
+      "copy_control_exact_match_accuracy": 0.0,
+      "num_examples": 200,
+      "prefix_match_accuracy": 0.0,
+      "strict_exact_match_accuracy": 0.0
+    },
+    "H2": {
+      "copy_control_exact_match_accuracy": 0.0,
+      "num_examples": 200,
+      "prefix_match_accuracy": 0.0,
+      "strict_exact_match_accuracy": 0.0
+    },
+    "H3": {
+      "copy_control_exact_match_accuracy": 0.0,
+      "num_examples": 200,
+      "prefix_match_accuracy": 0.0,
+      "strict_exact_match_accuracy": 0.0
+    }
+  },
+  "thresholds": {
+    "baseline_strict_em_threshold": 0.9,
+    "copy_control_threshold": 0.95
+  }
+}

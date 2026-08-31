@@ -1,0 +1,49 @@
+{
+  "dataset": {
+    "dataset": "preflight_relational_qa_baseline",
+    "files": {
+      "H1.jsonl": {
+        "examples": 200,
+        "sha256": "aecaad2c7acf5ffaba50ade9bcd5fd14fd2cc8b527525c24fcda252f3a68e12d"
+      },
+      "H2.jsonl": {
+        "examples": 200,
+        "sha256": "3c8d49639aafb3702cefc78195e7cda65780f92c7546eb55087e642e81e26da0"
+      },
+      "H3.jsonl": {
+        "examples": 200,
+        "sha256": "19c3eeec3280e45e15ebafff45ad2a1a1ec0cfa2787157d8d4909711879b0ee5"
+      }
+    },
+    "namespace": "preflight_baseline_v1",
+    "seed": 2025,
+    "total_examples": 600
+  },
+  "dataset_manifest_sha256": "7e069c4cdfec3f699f156d09a4748b48e63f9532b95391247ef435c7479075da",
+  "decoding": {
+    "do_sample": false,
+    "num_beams": 1
+  },
+  "device": "cuda",
+  "experiment": "exp01_first_feasibility",
+  "metrics_sha256": "f11e5e58a762aa0c82253decf26e0d80ada5024d648d44bfcfa4d50f50137402",
+  "mode": "baseline",
+  "model_id": "gpt2",
+  "model_path": "models/base_models/gpt2",
+  "namespace": "preflight_baseline_v1",
+  "precision": "bfloat16",
+  "prediction_files": {
+    "exp01_preflight_baseline_H1_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "004db5c59b170fd4891e2fe5526c9367f7507d7f3f08ca70082b9d82206a06c9"
+    },
+    "exp01_preflight_baseline_H2_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "510a9a09a2f8fbd75e4ef0e3f0afc0cf20a741e9c4077f3c2020c6a40e7d71ee"
+    },
+    "exp01_preflight_baseline_H3_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "c41ea2c4ae2ab8077d345599c624cff7bea0be0ae20890595b41d75387ae6079"
+    }
+  }
+}

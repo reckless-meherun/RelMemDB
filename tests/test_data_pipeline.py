@@ -1017,6 +1017,12 @@ def test_optional_n40k_qa_placeholders_remain_empty() -> None:
         assert (qa_dir / filename).stat().st_size == 0
 
 
-def test_preflight_qa_placeholders_remain_empty() -> None:
+def test_preflight_qa_baseline_populated_and_skill_training_empty() -> None:
     preflight_dir = EXP01_QA_DIR / "preflight_relational_qa"
-    assert all(path.stat().st_size == 0 for path in preflight_dir.rglob("*") if path.is_file())
+    baseline_dir = preflight_dir / "baseline"
+    for filename in ("H1.jsonl", "H2.jsonl", "H3.jsonl", "manifest.json"):
+        assert (baseline_dir / filename).stat().st_size > 0
+
+    skill_training_dir = preflight_dir / "skill_training"
+    for filename in ("train.jsonl", "val.jsonl", "manifest.json"):
+        assert (skill_training_dir / filename).stat().st_size == 0

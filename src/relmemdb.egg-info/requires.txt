@@ -1,0 +1,6 @@
+PyYAML>=6.0
+torch>=2.2
+transformers<5,>=4.45
+
+[dev]
+pytest>=7.0

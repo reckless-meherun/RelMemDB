@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -32,6 +33,13 @@ def _digest(*parts: object) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
+def _opaque_suffix(*parts: object) -> str:
+    """Render 40 SHA-256-derived bits as 12 token-efficient hex characters."""
+    # Decimal digits are a subset of hexadecimal characters and tokenize much
+    # more compactly in GPT-2 than unconstrained a-f-heavy digest slices.
+    return f"{int(_digest(*parts), 16) % 10**12:012d}"
+
+
 def _semantic_id(record: dict[str, Any]) -> str:
     semantic = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return f"pf_{hashlib.sha256(semantic.encode('utf-8')).hexdigest()}"
@@ -47,18 +55,18 @@ def build_baseline_example(seed: int, hop: int, index: int) -> dict[str, Any]:
     # Positions are ordered E3, E2, E1, E0 so following ``previous`` advances
     # one position. Every hop sees the same complete four-entity world shape.
     entities = [
-        f"pf_ent_{_digest(seed, PREFLIGHT_NAMESPACE, hop, index, 'entity', pos)[:20]}"
+        f"pf_ent_{_opaque_suffix(seed, PREFLIGHT_NAMESPACE, hop, index, 'entity', pos)}"
         for pos in range(4)
     ]
     values = [
-        f"pf_val_{_digest(seed, PREFLIGHT_NAMESPACE, hop, index, 'value', pos)[:20]}"
+        f"pf_val_{_opaque_suffix(seed, PREFLIGHT_NAMESPACE, hop, index, 'value', pos)}"
         for pos in range(4)
     ]
     labeled_facts = [
         *[
             (
                 f"relation_{pos}",
-                f"The entity immediately previous to entity {source} is {target}.",
+                f"Previous entity of {source} is {target}.",
             )
             for pos, (source, target) in enumerate(zip(entities, entities[1:]))
         ],
@@ -91,10 +99,25 @@ def generate_baseline_dataset(
 ) -> dict[int, list[dict[str, Any]]]:
     if examples_per_hop <= 0:
         raise ValueError("examples_per_hop must be positive")
-    return {
+    dataset = {
         hop: [build_baseline_example(seed, hop, index) for index in range(examples_per_hop)]
         for hop in hops
     }
+    seen_identifiers: set[str] = set()
+    identifier_pattern = re.compile(r"\bpf_(?:ent|val)_[0-9a-f]{12}\b")
+    for rows in dataset.values():
+        for row in rows:
+            identifiers = set(identifier_pattern.findall("\n".join(row["facts"])))
+            if len(identifiers) != 8:
+                raise ValueError(
+                    f"opaque identifier collision in preflight example {row['id']}"
+                )
+            collisions = seen_identifiers.intersection(identifiers)
+            if collisions:
+                collision = min(collisions)
+                raise ValueError(f"opaque identifier collision in baseline: {collision}")
+            seen_identifiers.update(identifiers)
+    return dataset
 
 
 def format_relational_prompt(example: dict[str, Any]) -> str:
@@ -268,12 +291,7 @@ def generate_continuations(
 ) -> list[str]:
     import torch
 
-    lengths = [len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
-    too_long = next((length for length in lengths if length > max_input_length), None)
-    if too_long is not None:
-        raise ValueError(
-            f"preflight prompt length {too_long} exceeds maximum {max_input_length}"
-        )
+    validate_prompt_lengths(prompts, tokenizer, max_input_length)
     continuations: list[str] = []
     for start in range(0, len(prompts), batch_size):
         batch = prompts[start : start + batch_size]
@@ -292,3 +310,18 @@ def generate_continuations(
             tokenizer.batch_decode(outputs[:, prompt_width:], skip_special_tokens=True)
         )
     return continuations
+
+
+def validate_prompt_lengths(
+    prompts: list[str], tokenizer: Any, max_input_length: int
+) -> list[int]:
+    """Return exact GPT-2 prompt lengths, rejecting rather than truncating."""
+    lengths = [
+        len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts
+    ]
+    maximum = max(lengths, default=0)
+    if maximum > max_input_length:
+        raise ValueError(
+            f"preflight prompt length {maximum} exceeds maximum {max_input_length}"
+        )
+    return lengths

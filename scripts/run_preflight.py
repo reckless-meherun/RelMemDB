@@ -23,6 +23,7 @@ from training.relational_qa import (  # noqa: E402
     load_gpt2,
     make_prediction_record,
     summarize_predictions,
+    validate_prompt_lengths,
     write_baseline_dataset,
 )
 
@@ -76,11 +77,27 @@ def main() -> int:
     rows = [example for hop in sorted(dataset) for example in dataset[hop]]
     relational_prompts = [format_relational_prompt(example) for example in rows]
     copy_prompts = [format_copy_prompt(example["answer"]) for example in rows]
+    max_input_length = preflight["max_input_length"]
+    relational_lengths = validate_prompt_lengths(
+        relational_prompts, tokenizer, max_input_length
+    )
+    validate_prompt_lengths(copy_prompts, tokenizer, max_input_length)
+    lengths_by_hop = {
+        hop: [
+            length
+            for example, length in zip(rows, relational_lengths, strict=True)
+            if example["hop"] == hop
+        ]
+        for hop in hops
+    }
+    print(f"Max prompt tokens overall: {max(relational_lengths)}")
+    for hop in hops:
+        print(f"Max H{hop} prompt tokens: {max(lengths_by_hop[hop])}")
     generation_args = (
         model,
         tokenizer,
         device,
-        preflight["max_input_length"],
+        max_input_length,
         preflight["max_new_tokens"],
     )
     relational_outputs = generate_continuations(relational_prompts, *generation_args)
