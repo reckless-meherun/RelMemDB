@@ -1,0 +1,65 @@
+{
+  "dataset": "primitive_visible_lookup_v1",
+  "files": {
+    "train.jsonl": {
+      "examples": 10000,
+      "per_type": {
+        "attribute": 5000,
+        "relation": 5000
+      },
+      "sha256": "1f75ea4c446472194fd2acfa1ef632e10039e0fe8e4acbf6070644bb082c1faa"
+    },
+    "val.jsonl": {
+      "examples": 2000,
+      "per_type": {
+        "attribute": 1000,
+        "relation": 1000
+      },
+      "sha256": "adc95ea351a32cd3da3cd3f59b5c233c4e37b2f2c480c136f553cc38867fe9dd"
+    }
+  },
+  "identifier_generation": "independent SHA-256 rejection sampling",
+  "identifier_surface_syntax": "pf_ent_<12 decimal digits> / pf_val_<12 decimal digits>",
+  "isolation": {
+    "all_pairwise_overlaps_zero": true,
+    "group_identifier_counts": {
+      "primitive_train": 80000,
+      "primitive_validation": 16000,
+      "relational_train": 120000,
+      "relational_validation": 24000,
+      "step6a_baseline": 4800,
+      "target_master_world": 29000
+    },
+    "pairwise_overlap_counts": {
+      "primitive_train__primitive_validation": 0,
+      "primitive_train__relational_train": 0,
+      "primitive_train__relational_validation": 0,
+      "primitive_train__step6a_baseline": 0,
+      "primitive_train__target_master_world": 0,
+      "primitive_validation__relational_train": 0,
+      "primitive_validation__relational_validation": 0,
+      "primitive_validation__step6a_baseline": 0,
+      "primitive_validation__target_master_world": 0,
+      "relational_train__relational_validation": 0,
+      "relational_train__step6a_baseline": 0,
+      "relational_train__target_master_world": 0,
+      "relational_validation__step6a_baseline": 0,
+      "relational_validation__target_master_world": 0,
+      "step6a_baseline__target_master_world": 0
+    },
+    "target_database_facts_used": false,
+    "verified": true
+  },
+  "maximum_prompt_tokens": 220,
+  "maximum_supervised_sequence_tokens": 231,
+  "namespaces": {
+    "train": "primitive_visible_lookup_train_v1",
+    "validation": "primitive_visible_lookup_validation_v1"
+  },
+  "relational_validation_used_for_primitive_model_selection": false,
+  "seed": 2025,
+  "step6a_baseline_used_for_model_selection": false,
+  "step6a_baseline_used_for_training": false,
+  "target_database_facts_used": false,
+  "total_examples": 12000
+}

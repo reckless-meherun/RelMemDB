@@ -10,26 +10,35 @@ import pytest
 
 from training.relational_qa import (
     PREFLIGHT_NAMESPACE,
+    PRIMITIVE_TRAIN_NAMESPACE,
+    PRIMITIVE_VALIDATION_NAMESPACE,
     SKILL_TRAIN_NAMESPACE,
     SKILL_VALIDATION_NAMESPACE,
     answer_prefix_match,
     build_skill_example,
+    build_primitive_example,
     classify_candidate_prediction,
+    curriculum_start_checkpoint,
     deterministic_json_bytes,
     encode_supervised_example,
     format_copy_prompt,
     format_relational_prompt,
     generate_baseline_dataset,
+    generate_primitive_dataset,
     generate_skill_dataset,
     make_prediction_record,
     post_skill_decision,
+    primitive_gate_decision,
     select_best_epoch,
     strict_exact_match,
     summarize_predictions,
+    step6c_decision,
+    train_primitive_skill,
     train_relational_skill,
     validate_prompt_lengths,
     visible_attribute_values,
     verify_skill_isolation,
+    verify_step6c_isolation,
 )
 
 
@@ -55,6 +64,11 @@ def gpt2_tokenizer():
 @pytest.fixture(scope="module")
 def skill_dataset(gpt2_tokenizer) -> dict[str, dict[int, list[dict]]]:
     return generate_skill_dataset(2025, 5000, 1000, gpt2_tokenizer)
+
+
+@pytest.fixture(scope="module")
+def primitive_dataset(gpt2_tokenizer) -> dict[str, dict[str, list[dict]]]:
+    return generate_primitive_dataset(2025, 5000, 1000, gpt2_tokenizer)
 
 
 def test_baseline_generation_is_byte_deterministic(dataset) -> None:
@@ -426,3 +440,169 @@ def test_post_skill_decision_ignores_copy_control() -> None:
         scores = {1: 0.90, 2: 0.90, 3: 0.90}
         scores[hop] = 0.899
         assert post_skill_decision(scores, 0.90) == "stop_and_diagnose"
+
+
+def test_primitive_dataset_counts_are_fixed_and_balanced(primitive_dataset) -> None:
+    assert {name: len(rows) for name, rows in primitive_dataset["train"].items()} == {
+        "relation": 5000,
+        "attribute": 5000,
+    }
+    assert {
+        name: len(rows) for name, rows in primitive_dataset["validation"].items()
+    } == {"relation": 1000, "attribute": 1000}
+    assert sum(map(len, primitive_dataset["train"].values())) == 10_000
+    assert sum(map(len, primitive_dataset["validation"].values())) == 2_000
+
+
+def test_primitive_relation_and_attribute_gold_are_visible_and_correct(
+    primitive_dataset,
+) -> None:
+    relation_fact = re.compile(
+        r"^Previous entity of (pf_ent_[0-9]{12}) is (pf_ent_[0-9]{12})\.$"
+    )
+    attribute_fact = re.compile(
+        r"^attribute_0 of entity (pf_ent_[0-9]{12}) is (pf_val_[0-9]{12})\.$"
+    )
+    relation_question = re.compile(
+        r"^Which entity is immediately previous to entity (pf_ent_[0-9]{12})\?$"
+    )
+    attribute_question = re.compile(
+        r"^What is attribute_0 of entity (pf_ent_[0-9]{12})\?$"
+    )
+    for split in primitive_dataset.values():
+        for qa_type, rows in split.items():
+            for row in rows:
+                previous = {
+                    match.group(1): match.group(2)
+                    for fact in row["facts"]
+                    if (match := relation_fact.fullmatch(fact))
+                }
+                attributes = {
+                    match.group(1): match.group(2)
+                    for fact in row["facts"]
+                    if (match := attribute_fact.fullmatch(fact))
+                }
+                assert len(row["facts"]) == 7
+                assert len(previous) == 3
+                assert len(attributes) == 4
+                if qa_type == "relation":
+                    source = relation_question.fullmatch(row["question"]).group(1)
+                    assert row["answer"] == previous[source]
+                else:
+                    entity = attribute_question.fullmatch(row["question"]).group(1)
+                    assert row["answer"] == attributes[entity]
+
+
+def test_primitive_generation_namespaces_surface_and_determinism(
+    primitive_dataset, gpt2_tokenizer
+) -> None:
+    assert PRIMITIVE_TRAIN_NAMESPACE == "primitive_visible_lookup_train_v1"
+    assert PRIMITIVE_VALIDATION_NAMESPACE == "primitive_visible_lookup_validation_v1"
+    first = generate_primitive_dataset(2025, 3, 2, gpt2_tokenizer)
+    second = generate_primitive_dataset(2025, 3, 2, gpt2_tokenizer)
+    assert deterministic_json_bytes(first) == deterministic_json_bytes(second)
+    serialized = deterministic_json_bytes(
+        [
+            row
+            for split in primitive_dataset.values()
+            for rows in split.values()
+            for row in rows
+        ],
+        jsonl=True,
+    ).decode()
+    identifier_sets = [
+        set(re.findall(r"\bpf_(?:ent|val)_[0-9]{12}\b", "\n".join(row["facts"])))
+        for split in primitive_dataset.values()
+        for rows in split.values()
+        for row in rows
+    ]
+    assert all(len(values) == 8 for values in identifier_sets)
+    identifiers = set().union(*identifier_sets)
+    assert len(identifiers) == (10_000 + 2_000) * 8
+    assert PRIMITIVE_TRAIN_NAMESPACE not in serialized
+    assert PRIMITIVE_VALIDATION_NAMESPACE not in serialized
+
+
+def test_step6c_all_six_identifier_groups_are_isolated(
+    primitive_dataset, skill_dataset, dataset
+) -> None:
+    relational_dataset = {
+        split: [row for rows in skill_dataset[split].values() for row in rows]
+        for split in ("train", "validation")
+    }
+    report = verify_step6c_isolation(
+        primitive_dataset, relational_dataset, dataset, TARGET_WORLD_PATH
+    )
+    assert report["verified"] is True
+    assert report["all_pairwise_overlaps_zero"] is True
+    assert all(value == 0 for value in report["pairwise_overlap_counts"].values())
+    assert set(report["group_identifier_counts"]) == {
+        "primitive_train",
+        "primitive_validation",
+        "relational_train",
+        "relational_validation",
+        "step6a_baseline",
+        "target_master_world",
+    }
+
+
+def test_primitive_prompts_fit_and_use_answer_only_eos_supervision(
+    primitive_dataset, gpt2_tokenizer
+) -> None:
+    rows = [
+        row
+        for split in primitive_dataset.values()
+        for rows in split.values()
+        for row in rows
+    ]
+    lengths = validate_prompt_lengths(
+        [format_relational_prompt(row) for row in rows], gpt2_tokenizer, 256
+    )
+    assert max(lengths) <= 256
+    for row in rows:
+        encoded = encode_supervised_example(row, gpt2_tokenizer, 256)
+        prompt_length = encoded["prompt_length"]
+        assert encoded["labels"][:prompt_length] == [-100] * prompt_length
+        assert encoded["labels"][-1] == gpt2_tokenizer.eos_token_id
+        assert encoded["input_ids"][-1] == gpt2_tokenizer.eos_token_id
+
+
+def test_generation_configuration_is_deterministic() -> None:
+    source = inspect.getsource(__import__("training.relational_qa", fromlist=["generate_continuations"]).generate_continuations)
+    assert "do_sample=False" in source
+    assert "num_beams=1" in source
+
+
+def test_primitive_gate_and_curriculum_checkpoint_rule(tmp_path) -> None:
+    checkpoint = tmp_path / "primitive"
+    passing = {"relation": 0.90, "attribute": 0.91}
+    assert primitive_gate_decision(passing) == "primitive_skill_ready"
+    assert curriculum_start_checkpoint(passing, checkpoint) == checkpoint
+    for failed in (
+        {"relation": 0.899, "attribute": 1.0},
+        {"relation": 1.0, "attribute": 0.899},
+    ):
+        assert primitive_gate_decision(failed) == "primitive_skill_failure"
+        assert curriculum_start_checkpoint(failed, checkpoint) is None
+
+
+def test_step6a_is_never_a_primitive_or_curriculum_training_selection_input() -> None:
+    for function in (train_primitive_skill, train_relational_skill):
+        parameters = inspect.signature(function).parameters
+        assert "baseline_dataset" not in parameters
+        assert "baseline_rows" not in parameters
+    assert tuple(inspect.signature(select_best_epoch).parameters) == ("epoch_records",)
+
+
+def test_step6c_three_way_decision_logic() -> None:
+    ready_primitives = {"relation": 0.95, "attribute": 0.94}
+    ready_relational = {1: 0.90, 2: 0.91, 3: 0.92}
+    assert (
+        step6c_decision({"relation": 0.89, "attribute": 1.0}, None)
+        == "primitive_skill_failure"
+    )
+    assert (
+        step6c_decision(ready_primitives, {1: 0.90, 2: 0.89, 3: 0.92})
+        == "composition_skill_failure"
+    )
+    assert step6c_decision(ready_primitives, ready_relational) == "relational_skill_ready"

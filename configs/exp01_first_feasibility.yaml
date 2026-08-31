@@ -52,6 +52,19 @@ preflight:
   max_input_length: 256
   max_new_tokens: 24
   generic_relational_skill_training: conditional_if_needed
+  primitive_training:
+    train_examples_per_type: 5000
+    validation_examples_per_type: 1000
+    epochs: 3
+    batch_size: 32
+    optimizer: AdamW
+    learning_rate: 5.0e-5
+    weight_decay: 0.01
+    scheduler: cosine
+    warmup_ratio: 0.05
+    max_grad_norm: 1.0
+    max_length: 256
+    seed: 2025
   skill_training:
     train_examples_per_hop: 5000
     validation_examples_per_hop: 1000

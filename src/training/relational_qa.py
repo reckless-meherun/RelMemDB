@@ -14,7 +14,13 @@ from typing import Any, Iterable
 PREFLIGHT_NAMESPACE = "preflight_baseline_v1"
 SKILL_TRAIN_NAMESPACE = "relational_skill_train_v2"
 SKILL_VALIDATION_NAMESPACE = "relational_skill_validation_v2"
+PRIMITIVE_TRAIN_NAMESPACE = "primitive_visible_lookup_train_v1"
+PRIMITIVE_VALIDATION_NAMESPACE = "primitive_visible_lookup_validation_v1"
 MODEL_ID = "gpt2"
+PRIMITIVE_QUESTION_TEMPLATES = {
+    "relation": "Which entity is immediately previous to entity {entity}?",
+    "attribute": "What is attribute_0 of entity {entity}?",
+}
 QUESTION_TEMPLATES = {
     1: (
         "Starting from entity {entity}, follow the previous-entity relation once. "
@@ -234,6 +240,183 @@ def generate_skill_dataset(
     return dataset
 
 
+def build_primitive_example(
+    seed: int, split: str, qa_type: str, index: int, tokenizer: Any
+) -> dict[str, Any]:
+    """Build one direct visible-context lookup with a fresh complete world."""
+    if split not in ("train", "validation"):
+        raise ValueError(f"unsupported primitive split: {split}")
+    if qa_type not in PRIMITIVE_QUESTION_TEMPLATES:
+        raise ValueError(f"unsupported primitive QA type: {qa_type}")
+    if index < 0:
+        raise ValueError("example index must be non-negative")
+    namespace = (
+        PRIMITIVE_TRAIN_NAMESPACE
+        if split == "train"
+        else PRIMITIVE_VALIDATION_NAMESPACE
+    )
+    entities = [
+        "pf_ent_"
+        + _independent_skill_suffix(
+            tokenizer, seed, namespace, qa_type, index, "entity", position
+        )
+        for position in range(4)
+    ]
+    values = [
+        "pf_val_"
+        + _independent_skill_suffix(
+            tokenizer, seed, namespace, qa_type, index, "value", position
+        )
+        for position in range(4)
+    ]
+    labeled_facts = [
+        *[
+            (f"relation_{position}", f"Previous entity of {source} is {target}.")
+            for position, (source, target) in enumerate(zip(entities, entities[1:]))
+        ],
+        *[
+            (f"attribute_{position}", f"attribute_0 of entity {entity} is {value}.")
+            for position, (entity, value) in enumerate(zip(entities, values))
+        ],
+    ]
+    labeled_facts.sort(
+        key=lambda item: (
+            _digest(seed, namespace, qa_type, index, "fact_order", item[0]),
+            item[0],
+        )
+    )
+    queried_position = int(
+        _digest(seed, namespace, qa_type, index, "query_position"), 16
+    ) % (3 if qa_type == "relation" else 4)
+    answer = (
+        entities[queried_position + 1]
+        if qa_type == "relation"
+        else values[queried_position]
+    )
+    semantic = {
+        "split": split,
+        "qa_type": qa_type,
+        "facts": [fact for _, fact in labeled_facts],
+        "question": PRIMITIVE_QUESTION_TEMPLATES[qa_type].format(
+            entity=entities[queried_position]
+        ),
+        "answer": answer,
+    }
+    record_id = hashlib.sha256(
+        json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {"id": f"pf_primitive_{record_id}", **semantic}
+
+
+def generate_primitive_dataset(
+    seed: int,
+    train_examples_per_type: int,
+    validation_examples_per_type: int,
+    tokenizer: Any,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    if train_examples_per_type <= 0 or validation_examples_per_type <= 0:
+        raise ValueError("primitive split sizes must be positive")
+    counts = {
+        "train": train_examples_per_type,
+        "validation": validation_examples_per_type,
+    }
+    dataset = {
+        split: {
+            qa_type: [
+                build_primitive_example(seed, split, qa_type, index, tokenizer)
+                for index in range(count)
+            ]
+            for qa_type in ("relation", "attribute")
+        }
+        for split, count in counts.items()
+    }
+    seen: set[str] = set()
+    for split in ("train", "validation"):
+        for qa_type in ("relation", "attribute"):
+            for row in dataset[split][qa_type]:
+                identifiers = _example_identifiers(row)
+                if len(identifiers) != 8:
+                    raise ValueError(
+                        f"identifier collision in primitive example {row['id']}"
+                    )
+                collision = seen.intersection(identifiers)
+                if collision:
+                    raise ValueError(
+                        f"identifier collision in primitive dataset: {min(collision)}"
+                    )
+                seen.update(identifiers)
+    return dataset
+
+
+def verify_step6c_isolation(
+    primitive_dataset: dict[str, dict[str, list[dict[str, Any]]]],
+    relational_dataset: dict[str, list[dict[str, Any]]],
+    baseline_dataset: dict[int, list[dict[str, Any]]],
+    target_world_path: Path,
+) -> dict[str, Any]:
+    """Verify all six Step-6C/held-out/target identifier groups are disjoint."""
+    groups = {
+        "primitive_train": set().union(
+            *(
+                _example_identifiers(row)
+                for rows in primitive_dataset["train"].values()
+                for row in rows
+            )
+        ),
+        "primitive_validation": set().union(
+            *(
+                _example_identifiers(row)
+                for rows in primitive_dataset["validation"].values()
+                for row in rows
+            )
+        ),
+        "relational_train": set().union(
+            *(_example_identifiers(row) for row in relational_dataset["train"])
+        ),
+        "relational_validation": set().union(
+            *(_example_identifiers(row) for row in relational_dataset["validation"])
+        ),
+        "step6a_baseline": set().union(
+            *(
+                _example_identifiers(row)
+                for rows in baseline_dataset.values()
+                for row in rows
+            )
+        ),
+        "target_master_world": set(
+            re.findall(
+                r"\b(?:e|v)_[0-9a-f]{32}\b",
+                target_world_path.read_text(encoding="utf-8"),
+            )
+        ),
+    }
+    overlaps: dict[str, int] = {}
+    names = list(groups)
+    for index, left_name in enumerate(names):
+        for right_name in names[index + 1 :]:
+            overlaps[f"{left_name}__{right_name}"] = len(
+                groups[left_name] & groups[right_name]
+            )
+    if any(overlaps.values()):
+        raise ValueError(f"Step-6C identifier isolation failure: {overlaps}")
+    for name in (
+        "primitive_train",
+        "primitive_validation",
+        "relational_train",
+        "relational_validation",
+        "step6a_baseline",
+    ):
+        if not all(token.startswith(("pf_ent_", "pf_val_")) for token in groups[name]):
+            raise ValueError(f"invalid preflight identifier surface in {name}")
+    return {
+        "group_identifier_counts": {name: len(values) for name, values in groups.items()},
+        "pairwise_overlap_counts": overlaps,
+        "all_pairwise_overlaps_zero": True,
+        "target_database_facts_used": False,
+        "verified": True,
+    }
+
+
 def verify_skill_isolation(
     skill_dataset: dict[str, dict[int, list[dict[str, Any]]]],
     baseline_dataset: dict[int, list[dict[str, Any]]],
@@ -325,6 +508,55 @@ def write_skill_dataset(
         "isolation": isolation,
         "step6a_baseline_used_for_training": False,
         "step6a_baseline_used_for_model_selection": False,
+        "target_database_facts_used": False,
+    }
+    (output_dir / "manifest.json").write_bytes(deterministic_json_bytes(manifest))
+    return manifest
+
+
+def write_primitive_dataset(
+    output_dir: Path,
+    dataset: dict[str, dict[str, list[dict[str, Any]]]],
+    seed: int,
+    isolation: dict[str, Any],
+    maximum_prompt_tokens: int,
+    maximum_sequence_tokens: int,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, Any] = {}
+    for split, filename in (("train", "train.jsonl"), ("validation", "val.jsonl")):
+        rows = [
+            row
+            for qa_type in ("relation", "attribute")
+            for row in dataset[split][qa_type]
+        ]
+        payload = deterministic_json_bytes(rows, jsonl=True)
+        (output_dir / filename).write_bytes(payload)
+        files[filename] = {
+            "examples": len(rows),
+            "per_type": {
+                qa_type: len(dataset[split][qa_type])
+                for qa_type in ("relation", "attribute")
+            },
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    manifest = {
+        "dataset": "primitive_visible_lookup_v1",
+        "seed": seed,
+        "namespaces": {
+            "train": PRIMITIVE_TRAIN_NAMESPACE,
+            "validation": PRIMITIVE_VALIDATION_NAMESPACE,
+        },
+        "total_examples": sum(item["examples"] for item in files.values()),
+        "maximum_prompt_tokens": maximum_prompt_tokens,
+        "maximum_supervised_sequence_tokens": maximum_sequence_tokens,
+        "identifier_surface_syntax": "pf_ent_<12 decimal digits> / pf_val_<12 decimal digits>",
+        "identifier_generation": "independent SHA-256 rejection sampling",
+        "files": files,
+        "isolation": isolation,
+        "step6a_baseline_used_for_training": False,
+        "step6a_baseline_used_for_model_selection": False,
+        "relational_validation_used_for_primitive_model_selection": False,
         "target_database_facts_used": False,
     }
     (output_dir / "manifest.json").write_bytes(deterministic_json_bytes(manifest))
@@ -652,6 +884,42 @@ def post_skill_decision(
     )
 
 
+def primitive_gate_decision(
+    primitive_scores: dict[str, float], threshold: float = 0.90
+) -> str:
+    required = ("relation", "attribute")
+    return (
+        "primitive_skill_ready"
+        if all(primitive_scores.get(name, 0.0) >= threshold for name in required)
+        else "primitive_skill_failure"
+    )
+
+
+def curriculum_start_checkpoint(
+    primitive_scores: dict[str, float], primitive_checkpoint: Path, threshold: float = 0.90
+) -> Path | None:
+    """Expose the only legal Phase-2 start, conditional on both primitive skills."""
+    if primitive_gate_decision(primitive_scores, threshold) == "primitive_skill_ready":
+        return primitive_checkpoint
+    return None
+
+
+def step6c_decision(
+    primitive_scores: dict[str, float],
+    relational_scores: dict[int, float] | None,
+    threshold: float = 0.90,
+) -> str:
+    if primitive_gate_decision(primitive_scores, threshold) == "primitive_skill_failure":
+        return "primitive_skill_failure"
+    if relational_scores is None:
+        raise ValueError("relational scores are required after the primitive gate passes")
+    return (
+        "relational_skill_ready"
+        if all(relational_scores.get(hop, 0.0) >= threshold for hop in (1, 2, 3))
+        else "composition_skill_failure"
+    )
+
+
 def _validation_loss(
     model: Any,
     encoded_rows: list[dict[str, list[int]]],
@@ -692,15 +960,15 @@ def _validation_exact_match(
     model: Any,
     tokenizer: Any,
     device: Any,
-    rows_by_hop: dict[int, list[dict[str, Any]]],
+    rows_by_hop: dict[Any, list[dict[str, Any]]],
     max_input_length: int,
     max_new_tokens: int,
     batch_size: int,
-) -> dict[int, float]:
+) -> dict[Any, float]:
     previous_cache_setting = model.config.use_cache
     model.config.use_cache = True
     model.eval()
-    scores: dict[int, float] = {}
+    scores: dict[Any, float] = {}
     for hop in sorted(rows_by_hop):
         rows = rows_by_hop[hop]
         continuations = generate_continuations(
@@ -720,17 +988,20 @@ def _validation_exact_match(
     return scores
 
 
-def train_relational_skill(
+def _train_visible_qa(
     model: Any,
     tokenizer: Any,
     device: Any,
     train_rows: list[dict[str, Any]],
-    validation_rows_by_hop: dict[int, list[dict[str, Any]]],
+    validation_rows_by_group: dict[Any, list[dict[str, Any]]],
     config: dict[str, Any],
     checkpoint_dir: Path,
     max_new_tokens: int,
+    metric_names: dict[Any, str],
+    phase: str,
+    source_checkpoint: Path,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Train once from base GPT-2 and save the validation-selected checkpoint."""
+    """Train answer-only visible QA and save the validation-selected checkpoint."""
     import time
 
     import torch
@@ -757,8 +1028,8 @@ def train_relational_skill(
     ]
     validation_rows = [
         row
-        for hop in sorted(validation_rows_by_hop)
-        for row in validation_rows_by_hop[hop]
+        for group in validation_rows_by_group
+        for row in validation_rows_by_group[group]
     ]
     validation_encoded = [
         encode_supervised_example(row, tokenizer, config["max_length"])
@@ -814,11 +1085,11 @@ def train_relational_skill(
             device,
             config["batch_size"],
         )
-        hop_scores = _validation_exact_match(
+        group_scores = _validation_exact_match(
             model,
             tokenizer,
             device,
-            validation_rows_by_hop,
+            validation_rows_by_group,
             config["max_length"],
             max_new_tokens,
             config["batch_size"],
@@ -827,8 +1098,12 @@ def train_relational_skill(
             "epoch": epoch,
             "train_loss": weighted_loss / supervised_tokens,
             "validation_loss": validation_loss,
-            **{f"validation_H{hop}_strict_em": hop_scores[hop] for hop in (1, 2, 3)},
-            "validation_overall_strict_em": sum(hop_scores.values()) / len(hop_scores),
+            **{
+                f"validation_{metric_names[group]}": group_scores[group]
+                for group in validation_rows_by_group
+            },
+            "validation_overall_strict_em": sum(group_scores.values())
+            / len(group_scores),
             "elapsed_seconds": time.perf_counter() - started,
         }
         records.append(record)
@@ -837,11 +1112,13 @@ def train_relational_skill(
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
             model.save_pretrained(checkpoint_dir, safe_serialization=True)
             tokenizer.save_pretrained(checkpoint_dir)
+        score_text = " ".join(
+            f"{metric_names[group]}={group_scores[group]:.4f}"
+            for group in validation_rows_by_group
+        )
         print(
             f"Epoch {epoch}: train_loss={record['train_loss']:.6f} "
-            f"val_loss={validation_loss:.6f} "
-            f"H1={hop_scores[1]:.4f} H2={hop_scores[2]:.4f} "
-            f"H3={hop_scores[3]:.4f} "
+            f"val_loss={validation_loss:.6f} {score_text} "
             f"overall={record['validation_overall_strict_em']:.4f}",
             flush=True,
         )
@@ -857,6 +1134,8 @@ def train_relational_skill(
         "total_optimizer_steps": total_steps,
         "warmup_steps": warmup_steps,
         "precision": "bfloat16" if use_bf16 else "float32",
+        "phase": phase,
+        "source_checkpoint": str(source_checkpoint),
         "step6a_baseline_used_for_training": False,
         "step6a_baseline_used_for_model_selection": False,
         "target_database_facts_used": False,
@@ -865,3 +1144,60 @@ def train_relational_skill(
         deterministic_json_bytes({"configuration": config, "epochs": records, **summary})
     )
     return records, summary
+
+
+def train_relational_skill(
+    model: Any,
+    tokenizer: Any,
+    device: Any,
+    train_rows: list[dict[str, Any]],
+    validation_rows_by_hop: dict[int, list[dict[str, Any]]],
+    config: dict[str, Any],
+    checkpoint_dir: Path,
+    max_new_tokens: int,
+    source_checkpoint: Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Train relational H1/H2/H3 from the explicitly recorded checkpoint."""
+    return _train_visible_qa(
+        model,
+        tokenizer,
+        device,
+        train_rows,
+        validation_rows_by_hop,
+        config,
+        checkpoint_dir,
+        max_new_tokens,
+        {hop: f"H{hop}_strict_em" for hop in validation_rows_by_hop},
+        "relational_curriculum",
+        source_checkpoint or Path("models/base_models/gpt2"),
+    )
+
+
+def train_primitive_skill(
+    model: Any,
+    tokenizer: Any,
+    device: Any,
+    train_rows: list[dict[str, Any]],
+    validation_rows_by_type: dict[str, list[dict[str, Any]]],
+    config: dict[str, Any],
+    checkpoint_dir: Path,
+    max_new_tokens: int,
+    source_checkpoint: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Train the relation and attribute lookup primitives from base GPT-2."""
+    return _train_visible_qa(
+        model,
+        tokenizer,
+        device,
+        train_rows,
+        validation_rows_by_type,
+        config,
+        checkpoint_dir,
+        max_new_tokens,
+        {
+            "relation": "relation_lookup_EM",
+            "attribute": "attribute_lookup_EM",
+        },
+        "primitive_sft",
+        source_checkpoint,
+    )

@@ -1,0 +1,50 @@
+{
+  "dataset": {
+    "dataset": "preflight_relational_qa_baseline",
+    "files": {
+      "H1.jsonl": {
+        "examples": 200,
+        "sha256": "aecaad2c7acf5ffaba50ade9bcd5fd14fd2cc8b527525c24fcda252f3a68e12d"
+      },
+      "H2.jsonl": {
+        "examples": 200,
+        "sha256": "3c8d49639aafb3702cefc78195e7cda65780f92c7546eb55087e642e81e26da0"
+      },
+      "H3.jsonl": {
+        "examples": 200,
+        "sha256": "19c3eeec3280e45e15ebafff45ad2a1a1ec0cfa2787157d8d4909711879b0ee5"
+      }
+    },
+    "namespace": "preflight_baseline_v1",
+    "seed": 2025,
+    "total_examples": 600
+  },
+  "dataset_manifest_sha256": "7e069c4cdfec3f699f156d09a4748b48e63f9532b95391247ef435c7479075da",
+  "decoding": {
+    "do_sample": false,
+    "num_beams": 1
+  },
+  "device": "cuda",
+  "experiment": "exp01_first_feasibility",
+  "maximum_prompt_tokens": 248,
+  "metrics_sha256": "708c70bd683620f3e2145679ca3f0b9ba23949907af72b5358e68148877dae4f",
+  "mode": "after-curriculum",
+  "model_path": "models/trained_models/gpt2_relational_curriculum",
+  "namespace": "preflight_baseline_v1",
+  "precision": "bfloat16",
+  "prediction_files": {
+    "exp01_preflight_after_curriculum_H1_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "49252003ba9e52ba2de62f1cb4c99406d33243a35bb168b26abe19010fb0fb9b"
+    },
+    "exp01_preflight_after_curriculum_H2_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "a636394e8d165b5d9695b3a9a178a9298e92b6561dcb92a91b132d9c9ada85d3"
+    },
+    "exp01_preflight_after_curriculum_H3_predictions_PLACEHOLDER.jsonl": {
+      "examples": 200,
+      "sha256": "9459974f01abaae4174ec5f1fd4e0778846c468b184ad85cba71f3b2844d63e0"
+    }
+  },
+  "runtime_seconds": 2.930167487822473
+}

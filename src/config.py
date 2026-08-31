@@ -259,6 +259,48 @@ def validate_config(config: dict[str, Any]) -> None:
         _required(preflight, "skill_training", "preflight"),
         "preflight.skill_training",
     )
+    primitive_config = _require_mapping(
+        _required(preflight, "primitive_training", "preflight"),
+        "preflight.primitive_training",
+    )
+    for key in (
+        "train_examples_per_type",
+        "validation_examples_per_type",
+        "epochs",
+        "batch_size",
+        "max_length",
+    ):
+        _require_positive_int(
+            _required(primitive_config, key, "preflight.primitive_training"),
+            f"preflight.primitive_training.{key}",
+        )
+    _require_non_negative_int(
+        _required(primitive_config, "seed", "preflight.primitive_training"),
+        "preflight.primitive_training.seed",
+    )
+    for key in ("learning_rate", "weight_decay", "max_grad_norm"):
+        value = _require_number(
+            _required(primitive_config, key, "preflight.primitive_training"),
+            f"preflight.primitive_training.{key}",
+        )
+        if value < 0 or (key != "weight_decay" and value == 0):
+            raise ConfigError(f"preflight.primitive_training.{key} must be positive")
+    primitive_warmup = _require_number(
+        _required(primitive_config, "warmup_ratio", "preflight.primitive_training"),
+        "preflight.primitive_training.warmup_ratio",
+    )
+    if not 0.0 <= primitive_warmup <= 1.0:
+        raise ConfigError(
+            "preflight.primitive_training.warmup_ratio must be between 0 and 1"
+        )
+    for key in ("optimizer", "scheduler"):
+        value = _required(primitive_config, key, "preflight.primitive_training")
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(
+                f"preflight.primitive_training.{key} must be a non-empty string"
+            )
+    if primitive_config["max_length"] != preflight["max_input_length"]:
+        raise ConfigError("preflight primitive-training and input lengths must match")
     for key in (
         "train_examples_per_hop",
         "validation_examples_per_hop",

@@ -1,0 +1,241 @@
+{
+  "decision": "composition_skill_failure",
+  "held_out_step6a": {
+    "copy_control_role": "diagnostic_only",
+    "decision": "composition_skill_failure",
+    "overall": {
+      "copy_control_exact_match_accuracy": 0.9966666666666667,
+      "exact_correct_rate": 0.27666666666666667,
+      "non_candidate_generation_rate": 0.02666666666666667,
+      "num_examples": 600,
+      "prefix_match_accuracy": 0.27666666666666667,
+      "strict_exact_match_accuracy": 0.27666666666666667,
+      "wrong_visible_candidate_rate": 0.6966666666666667
+    },
+    "per_hop": {
+      "H1": {
+        "copy_control_exact_match_accuracy": 1.0,
+        "exact_correct_rate": 0.285,
+        "non_candidate_generation_rate": 0.03,
+        "num_examples": 200,
+        "prefix_match_accuracy": 0.285,
+        "strict_exact_match_accuracy": 0.285,
+        "wrong_visible_candidate_rate": 0.685
+      },
+      "H2": {
+        "copy_control_exact_match_accuracy": 0.995,
+        "exact_correct_rate": 0.27,
+        "non_candidate_generation_rate": 0.015,
+        "num_examples": 200,
+        "prefix_match_accuracy": 0.27,
+        "strict_exact_match_accuracy": 0.27,
+        "wrong_visible_candidate_rate": 0.715
+      },
+      "H3": {
+        "copy_control_exact_match_accuracy": 0.995,
+        "exact_correct_rate": 0.275,
+        "non_candidate_generation_rate": 0.035,
+        "num_examples": 200,
+        "prefix_match_accuracy": 0.275,
+        "strict_exact_match_accuracy": 0.275,
+        "wrong_visible_candidate_rate": 0.69
+      }
+    },
+    "thresholds": {
+      "baseline_strict_em_threshold": 0.9,
+      "copy_control_threshold": 0.95
+    }
+  },
+  "isolation": {
+    "all_pairwise_overlaps_zero": true,
+    "group_identifier_counts": {
+      "primitive_train": 80000,
+      "primitive_validation": 16000,
+      "relational_train": 120000,
+      "relational_validation": 24000,
+      "step6a_baseline": 4800,
+      "target_master_world": 29000
+    },
+    "pairwise_overlap_counts": {
+      "primitive_train__primitive_validation": 0,
+      "primitive_train__relational_train": 0,
+      "primitive_train__relational_validation": 0,
+      "primitive_train__step6a_baseline": 0,
+      "primitive_train__target_master_world": 0,
+      "primitive_validation__relational_train": 0,
+      "primitive_validation__relational_validation": 0,
+      "primitive_validation__step6a_baseline": 0,
+      "primitive_validation__target_master_world": 0,
+      "relational_train__relational_validation": 0,
+      "relational_train__step6a_baseline": 0,
+      "relational_train__target_master_world": 0,
+      "relational_validation__step6a_baseline": 0,
+      "relational_validation__target_master_world": 0,
+      "step6a_baseline__target_master_world": 0
+    },
+    "target_database_facts_used": false,
+    "verified": true
+  },
+  "phase2_started": true,
+  "primitive_dataset": {
+    "dataset": "primitive_visible_lookup_v1",
+    "files": {
+      "train.jsonl": {
+        "examples": 10000,
+        "per_type": {
+          "attribute": 5000,
+          "relation": 5000
+        },
+        "sha256": "1f75ea4c446472194fd2acfa1ef632e10039e0fe8e4acbf6070644bb082c1faa"
+      },
+      "val.jsonl": {
+        "examples": 2000,
+        "per_type": {
+          "attribute": 1000,
+          "relation": 1000
+        },
+        "sha256": "adc95ea351a32cd3da3cd3f59b5c233c4e37b2f2c480c136f553cc38867fe9dd"
+      }
+    },
+    "identifier_generation": "independent SHA-256 rejection sampling",
+    "identifier_surface_syntax": "pf_ent_<12 decimal digits> / pf_val_<12 decimal digits>",
+    "isolation": {
+      "all_pairwise_overlaps_zero": true,
+      "group_identifier_counts": {
+        "primitive_train": 80000,
+        "primitive_validation": 16000,
+        "relational_train": 120000,
+        "relational_validation": 24000,
+        "step6a_baseline": 4800,
+        "target_master_world": 29000
+      },
+      "pairwise_overlap_counts": {
+        "primitive_train__primitive_validation": 0,
+        "primitive_train__relational_train": 0,
+        "primitive_train__relational_validation": 0,
+        "primitive_train__step6a_baseline": 0,
+        "primitive_train__target_master_world": 0,
+        "primitive_validation__relational_train": 0,
+        "primitive_validation__relational_validation": 0,
+        "primitive_validation__step6a_baseline": 0,
+        "primitive_validation__target_master_world": 0,
+        "relational_train__relational_validation": 0,
+        "relational_train__step6a_baseline": 0,
+        "relational_train__target_master_world": 0,
+        "relational_validation__step6a_baseline": 0,
+        "relational_validation__target_master_world": 0,
+        "step6a_baseline__target_master_world": 0
+      },
+      "target_database_facts_used": false,
+      "verified": true
+    },
+    "maximum_prompt_tokens": 220,
+    "maximum_supervised_sequence_tokens": 231,
+    "namespaces": {
+      "train": "primitive_visible_lookup_train_v1",
+      "validation": "primitive_visible_lookup_validation_v1"
+    },
+    "relational_validation_used_for_primitive_model_selection": false,
+    "seed": 2025,
+    "step6a_baseline_used_for_model_selection": false,
+    "step6a_baseline_used_for_training": false,
+    "target_database_facts_used": false,
+    "total_examples": 12000
+  },
+  "primitive_gate": "primitive_skill_ready",
+  "primitive_training": {
+    "epochs": [
+      {
+        "elapsed_seconds": 38.31515791453421,
+        "epoch": 1,
+        "train_loss": 0.1835673248227289,
+        "validation_attribute_lookup_EM": 0.995,
+        "validation_loss": 0.004146861516364984,
+        "validation_overall_strict_em": 0.9955,
+        "validation_relation_lookup_EM": 0.996
+      },
+      {
+        "elapsed_seconds": 76.71884392760694,
+        "epoch": 2,
+        "train_loss": 0.011807921704205783,
+        "validation_attribute_lookup_EM": 0.998,
+        "validation_loss": 0.0005823772977250379,
+        "validation_overall_strict_em": 0.999,
+        "validation_relation_lookup_EM": 1.0
+      },
+      {
+        "elapsed_seconds": 115.06593597400934,
+        "epoch": 3,
+        "train_loss": 0.004625661572168583,
+        "validation_attribute_lookup_EM": 0.997,
+        "validation_loss": 0.0008905835677503844,
+        "validation_overall_strict_em": 0.998,
+        "validation_relation_lookup_EM": 0.999
+      }
+    ],
+    "peak_gpu_memory_bytes": 13011234304,
+    "phase": "primitive_sft",
+    "precision": "bfloat16",
+    "runtime_seconds": 115.0659605069086,
+    "selected_epoch": 2,
+    "selected_scores": {
+      "attribute": 0.998,
+      "relation": 1.0
+    },
+    "source_checkpoint": "/home/hpc4090/meherun/relmemdb/models/base_models/gpt2",
+    "step6a_baseline_used_for_model_selection": false,
+    "step6a_baseline_used_for_training": false,
+    "target_database_facts_used": false,
+    "total_optimizer_steps": 939,
+    "warmup_steps": 46
+  },
+  "relational_training": {
+    "epochs": [
+      {
+        "elapsed_seconds": 60.2286073686555,
+        "epoch": 1,
+        "train_loss": 0.2998392321168695,
+        "validation_H1_strict_em": 0.29,
+        "validation_H2_strict_em": 0.249,
+        "validation_H3_strict_em": 0.273,
+        "validation_loss": 0.2037113559099508,
+        "validation_overall_strict_em": 0.27066666666666667
+      },
+      {
+        "elapsed_seconds": 120.59989238996059,
+        "epoch": 2,
+        "train_loss": 0.20254970257946922,
+        "validation_H1_strict_em": 0.312,
+        "validation_H2_strict_em": 0.299,
+        "validation_H3_strict_em": 0.283,
+        "validation_loss": 0.1822749731076388,
+        "validation_overall_strict_em": 0.298
+      },
+      {
+        "elapsed_seconds": 181.02290177438408,
+        "epoch": 3,
+        "train_loss": 0.17235880055004868,
+        "validation_H1_strict_em": 0.305,
+        "validation_H2_strict_em": 0.285,
+        "validation_H3_strict_em": 0.288,
+        "validation_loss": 0.17760409135686417,
+        "validation_overall_strict_em": 0.29266666666666663
+      }
+    ],
+    "peak_gpu_memory_bytes": 13726345216,
+    "phase": "relational_curriculum",
+    "precision": "bfloat16",
+    "runtime_seconds": 181.02292551659048,
+    "selected_epoch": 2,
+    "source_checkpoint": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_primitive_skill",
+    "step6a_baseline_used_for_model_selection": false,
+    "step6a_baseline_used_for_training": false,
+    "target_database_facts_used": false,
+    "total_optimizer_steps": 1407,
+    "warmup_steps": 70
+  },
+  "step": "6C",
+  "step6a_baseline_used_for_model_selection": false,
+  "step6a_baseline_used_for_training": false,
+  "target_database_facts_used": false
+}
