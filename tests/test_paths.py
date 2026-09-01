@@ -121,7 +121,10 @@ def test_default_experiment_config() -> None:
         "drop_last": False,
     }
     assert config["target_sft"] == {
-        "training_split": "validation",
+        "dataset_dir": "target_sft",
+        "training_split": "train",
+        "dev_split": "dev",
+        "early_stopping_patience": 3,
         "batch_size": 32,
         "gradient_accumulation_steps": 1,
         "epochs": 10,

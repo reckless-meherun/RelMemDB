@@ -321,11 +321,25 @@ def validate_config(config: dict[str, Any]) -> None:
     ):
         _require_bool(_required(training, key, "training"), f"training.{key}")
 
+    dataset_dir = _required(target_sft, "dataset_dir", "target_sft")
+    if dataset_dir != "target_sft":
+        raise ConfigError("target_sft.dataset_dir must be target_sft")
     training_split = _required(target_sft, "training_split", "target_sft")
-    if training_split != "validation":
+    if training_split != "train":
         raise ConfigError(
-            "target_sft.training_split must be validation; test is held out"
+            "target_sft.training_split must be train; validation and test are held out"
         )
+    dev_split = _required(target_sft, "dev_split", "target_sft")
+    if dev_split != "dev":
+        raise ConfigError(
+            "target_sft.dev_split must be dev; validation and test are held out"
+        )
+    early_stopping_patience = _require_positive_int(
+        _required(target_sft, "early_stopping_patience", "target_sft"),
+        "target_sft.early_stopping_patience",
+    )
+    if early_stopping_patience != 3:
+        raise ConfigError("target_sft.early_stopping_patience must be 3")
     for key in (
         "batch_size",
         "gradient_accumulation_steps",

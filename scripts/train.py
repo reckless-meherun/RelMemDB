@@ -77,10 +77,9 @@ def build_target_sft_paths(
     source_checkpoint: Path,
 ) -> dict[str, Path]:
     settings = config["target_sft"]
-    training_split = settings["training_split"]
     epochs = settings["epochs"]
     source_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", source_checkpoint.name)
-    checkpoint_name = f"{source_name}_sft_{training_split}_e{epochs}"
+    checkpoint_name = f"{source_name}_sft_target_e{epochs}"
     run_stem = f"{checkpoint_name}_T{table_count}_N{fact_count}"
     run_dir = target_sft_run_dir(table_count, fact_count)
     return {
@@ -123,8 +122,10 @@ def main() -> None:
             qa_condition_dir=paths["qa_condition_dir"],
         )
         print(
-            f"Target SFT complete: examples={summary['total_examples']}, "
+            f"Target SFT complete: train_examples={summary['train_example_count']}, "
+            f"dev_examples={summary['dev_example_count']}, "
             f"steps={summary['optimizer_steps']}, "
+            f"selected_epoch={summary['selected_epoch']}, "
             f"loss={summary['training_loss']:.6f}, "
             f"checkpoint={summary['output_checkpoint']}"
         )
