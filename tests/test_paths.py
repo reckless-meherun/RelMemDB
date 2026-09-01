@@ -20,6 +20,7 @@ from utils.paths import (
     database_condition_dir,
     n_sweep_database_dir,
     n_sweep_qa_dir,
+    qa_condition_dir,
     t_sweep_database_dir,
     t_sweep_qa_dir,
 )
@@ -103,4 +104,10 @@ def test_canonical_cpt_paths() -> None:
     assert cpt_database_dir(12, 10_000) == condition / "cpt"
     assert cpt_run_dir(12, 10_000) == (
         EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "PLACEHOLDER_RUN"
+    )
+
+
+def test_canonical_closed_book_qa_path() -> None:
+    assert qa_condition_dir(12, 10_000) == (
+        EXP01_QA_DIR / "t_sweep_N10K" / "T12"
     )

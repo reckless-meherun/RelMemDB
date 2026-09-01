@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 CONFIGS_DIR = PROJECT_ROOT / "configs"
@@ -92,6 +91,16 @@ def n_sweep_qa_dir(fact_count: int) -> Path:
     if fact_count == 10_000:
         return t_sweep_qa_dir(8)
     return EXP01_QA_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
+
+
+def qa_condition_dir(table_count: int, fact_count: int) -> Path:
+    table_count = _positive_int(table_count, "table_count")
+    fact_count = _positive_int(fact_count, "fact_count")
+    if fact_count == 10_000:
+        return t_sweep_qa_dir(table_count)
+    if table_count == 8:
+        return n_sweep_qa_dir(fact_count)
+    raise ValueError("non-N10K QA conditions must use the n_sweep_T8 architecture")
 
 
 def ensure_dir(path: str | Path) -> Path:

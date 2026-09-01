@@ -1,29 +1,29 @@
 from copy import deepcopy
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from config import load_config, validate_config
+from config import load_config
 from data.materialize import build_database_manifest, materialize_database
 from data.qa import (
+    HOP_NAMES,
+    RAW_ENTITY_IDENTIFIER,
+    answer_is_in_question,
+    assign_chain_splits,
+    filter_qa_candidates,
     generate_condition_qa,
-    generate_qa_records,
-    load_verified_logical_chains,
+    generate_qa_candidates,
+    load_verified_semantic_chains,
 )
-from data.serialize import serialize_database_cpt
-from data.world import build_master_world
+from data.world import (
+    NATURAL_IDENTIFIER_FIELDS,
+    SEMANTIC_ENTITY_SPECS,
+    build_master_world,
+)
 from utils.hashing import hash_file
-from utils.io import write_json
-from utils.paths import (
-    EXP01_QA_DIR,
-    PROJECT_ROOT,
-    n_sweep_database_dir,
-    n_sweep_qa_dir,
-    t_sweep_database_dir,
-    t_sweep_qa_dir,
-)
+from utils.io import read_json, read_jsonl, write_json
+from utils.paths import EXP01_QA_DIR, PROJECT_ROOT
 
 
 @pytest.fixture(scope="module")
@@ -31,317 +31,412 @@ def default_config() -> dict[str, Any]:
     return load_config()
 
 
-@pytest.fixture(scope="module")
-def small_config(default_config: dict[str, Any]) -> dict[str, Any]:
-    config = deepcopy(default_config)
-    data = config["data"]
-    data["reuse_t8_n10k"] = False
-    data["t_sweep"]["fact_count"] = 400
-    data["n_sweep"]["fact_counts"] = [200, 400]
-    data["optional_n40k"]["fact_count"] = 800
-    validate_config(config)
-    return config
+def _alphabetic_index(index: int) -> str:
+    value = index + 1
+    letters = []
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        letters.append(chr(ord("A") + remainder))
+    return "".join(reversed(letters))
+
+
+def _world_with_nonleaky_test_anchors(config: dict[str, Any]) -> dict[str, Any]:
+    world = deepcopy(build_master_world(config))
+    for chain_index, chain in enumerate(world["chains"]):
+        label = _alphabetic_index(chain_index)
+        for entity in chain["entities"]:
+            field = NATURAL_IDENTIFIER_FIELDS.get(entity["entity_type"])
+            if field is None:
+                continue
+            for attribute in entity["attributes"]:
+                if attribute["name"] == field:
+                    entity_label = entity["entity_type"].replace("_", " ").title()
+                    attribute["value"] = f"{entity_label} Meridian {label}"
+                    break
+    return world
 
 
 @pytest.fixture(scope="module")
-def small_world(small_config: dict[str, Any]) -> dict[str, Any]:
-    return build_master_world(small_config)
-
-
-def _build_serialized_test_condition(
-    tmp_path: Path,
-    config: dict[str, Any],
-    world: dict[str, Any],
-    *,
-    table_count: int = 4,
-    logical_fact_count: int = 200,
-) -> tuple[Path, Path, Path, Path, dict[str, Any]]:
-    database_path = tmp_path / "database.sqlite"
-    database_manifest_path = tmp_path / "database_manifest.json"
-    train_text_path = tmp_path / "train.txt"
-    cpt_manifest_path = tmp_path / "cpt_manifest.json"
-    materialization = materialize_database(
-        world,
-        table_count=table_count,
-        logical_fact_count=logical_fact_count,
-        output_path=database_path,
-    )
+def qa_condition(
+    tmp_path_factory: pytest.TempPathFactory,
+    default_config: dict[str, Any],
+) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("semantic_qa")
+    database_path = root / "database.sqlite"
+    database_manifest_path = root / "manifest.json"
+    world = _world_with_nonleaky_test_anchors(default_config)
+    materialization = materialize_database(world, 12, 10_000, database_path)
     database_manifest = build_database_manifest(
-        config,
+        default_config,
         materialization,
-        sweep="test_sweep",
-        master_world_sha256="master-hash",
-        configuration_sha256="configuration-hash",
+        sweep="temporary_test",
+        master_world_sha256="temporary-master-world",
+        configuration_sha256="temporary-config",
         database_sha256=hash_file(database_path),
     )
     write_json(database_manifest_path, database_manifest)
-    cpt_manifest = serialize_database_cpt(
-        config,
-        database_path=database_path,
-        database_manifest_path=database_manifest_path,
-        train_text_path=train_text_path,
-    )
-    write_json(cpt_manifest_path, cpt_manifest)
-    return (
+    chains, _ = load_verified_semantic_chains(
         database_path,
         database_manifest_path,
-        train_text_path,
-        cpt_manifest_path,
-        cpt_manifest,
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
     )
-
-
-def _load_condition_chains(
-    condition_dir: Path, table_count: int
-) -> list[dict[str, Any]]:
-    chains, _ = load_verified_logical_chains(
-        condition_dir / "database.sqlite",
-        condition_dir / "manifest.json",
-        expected_table_count=table_count,
+    output_dir = root / "qa"
+    source_hash_before = hash_file(database_path)
+    result = generate_condition_qa(
+        default_config,
+        database_path,
+        database_manifest_path,
+        output_dir,
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
     )
-    return chains
-
-
-def _qa_jsonl_bytes(records: list[dict[str, Any]]) -> bytes:
-    return "".join(
-        f"{json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',', ':'))}\n"
-        for record in records
-    ).encode("utf-8")
-
-
-def test_physical_database_reconstruction_across_t() -> None:
-    reconstructed = [
-        _load_condition_chains(t_sweep_database_dir(table_count), table_count)
-        for table_count in (4, 8, 12)
-    ]
-    assert reconstructed[0] == reconstructed[1] == reconstructed[2]
-
-    for chain in reconstructed[0]:
-        assert len(chain["entities"]) == 12
-        assert sum(
-            len(entity["attributes"]) for entity in chain["entities"]
-        ) == 17
-        assert len(chain["previous_entity_ids"][1:]) == 11
-        assert all(chain["previous_entity_ids"][1:])
-
-
-def test_qa_counts_per_chain() -> None:
-    chain = _load_condition_chains(t_sweep_database_dir(4), 4)[0]
-    records = generate_qa_records([chain])
-
-    assert sum(record["type"] == "attribute" for record in records["H0"]) == 17
-    assert sum(record["type"] == "relation" for record in records["H0"]) == 11
-    assert len(records["H0"]) == 28
-    assert len(records["H1"]) == 11
-    assert len(records["H2"]) == 10
-    assert len(records["H3"]) == 9
-
-
-def test_qa_gold_answers_and_support_paths() -> None:
-    chains = _load_condition_chains(t_sweep_database_dir(4), 4)[:2]
-    records = generate_qa_records(chains)
-    entity_locations = {
-        entity["entity_id"]: (chain, position)
-        for chain in chains
-        for position, entity in enumerate(chain["entities"])
+    assert hash_file(database_path) == source_hash_before
+    return {
+        "root": root,
+        "database_path": database_path,
+        "database_manifest_path": database_manifest_path,
+        "chains": chains,
+        "output_dir": output_dir,
+        "result": result,
     }
-    h0_by_id = {record["id"]: record for record in records["H0"]}
-    attribute_ids: dict[tuple[str, str], str] = {}
-    relation_ids: dict[str, str] = {}
-
-    for chain in chains:
-        for position, entity in enumerate(chain["entities"]):
-            entity_id = entity["entity_id"]
-            for slot, expected_answer in entity["attributes"].items():
-                question = f"What is {slot} of entity {entity_id}?"
-                matches = [
-                    record
-                    for record in records["H0"]
-                    if record["question"] == question
-                ]
-                assert len(matches) == 1
-                assert matches[0]["answer"] == expected_answer
-                attribute_ids[(entity_id, slot)] = matches[0]["id"]
-            if position > 0:
-                question = (
-                    "Which entity is immediately previous to entity "
-                    f"{entity_id}?"
-                )
-                matches = [
-                    record
-                    for record in records["H0"]
-                    if record["question"] == question
-                ]
-                assert len(matches) == 1
-                assert matches[0]["answer"] == chain["previous_entity_ids"][position]
-                relation_ids[entity_id] = matches[0]["id"]
-
-    for hop in (1, 2, 3):
-        for record in records[f"H{hop}"]:
-            prefix = "Starting from entity "
-            source_entity_id = record["question"][len(prefix) :].split(",", 1)[0]
-            chain, source_position = entity_locations[source_entity_id]
-            target_entity = chain["entities"][source_position - hop]
-            expected_supports = [
-                relation_ids[chain["entities"][position]["entity_id"]]
-                for position in range(source_position, source_position - hop, -1)
-            ]
-            expected_supports.append(
-                attribute_ids[(target_entity["entity_id"], "attribute_0")]
-            )
-            assert record["answer"] == target_entity["attributes"]["attribute_0"]
-            assert record["support_fact_ids"] == expected_supports
-            assert len(record["support_fact_ids"]) == hop + 1
-            assert all(support_id in h0_by_id for support_id in expected_supports)
 
 
-def test_qa_ids_are_unique_stable_and_t_independent() -> None:
-    record_sets = []
-    for table_count in (4, 8, 12):
-        chains = _load_condition_chains(
-            t_sweep_database_dir(table_count), table_count
-        )[:3]
-        records = generate_qa_records(chains)
-        all_ids = [
-            record["id"]
-            for hop_records in records.values()
-            for record in hop_records
-        ]
-        assert len(all_ids) == len(set(all_ids))
-        record_sets.append(records)
-    assert record_sets[0] == record_sets[1] == record_sets[2]
+def _records_for_split(output_dir: Path, split: str) -> dict[str, list[dict[str, Any]]]:
+    return {
+        hop_name: read_jsonl(output_dir / split / f"{hop_name}.jsonl")
+        for hop_name in HOP_NAMES
+    }
 
 
-def test_qa_t_sweep_jsonl_bytes_are_identical() -> None:
-    records_by_t = [
-        generate_qa_records(
-            _load_condition_chains(t_sweep_database_dir(table_count), table_count)
-        )
-        for table_count in (4, 8, 12)
-    ]
-    for hop in ("H0", "H1", "H2", "H3"):
-        serialized = [
-            _qa_jsonl_bytes(records[hop]) for records in records_by_t
-        ]
-        assert serialized[0] == serialized[1] == serialized[2]
-
-
-def test_qa_n_sweep_prefix_nesting() -> None:
-    condition_records = [
-        generate_qa_records(
-            _load_condition_chains(condition_dir, 8)
-        )
-        for condition_dir in (
-            n_sweep_database_dir(5_000),
-            t_sweep_database_dir(8),
-            n_sweep_database_dir(20_000),
-        )
-    ]
-    for hop in ("H0", "H1", "H2", "H3"):
-        n5k, n10k, n20k = [records[hop] for records in condition_records]
-        assert len(n5k) < len(n10k) < len(n20k)
-        assert n5k == n10k[: len(n5k)]
-        assert n10k == n20k[: len(n10k)]
-
-
-def test_qa_record_schema_and_no_physical_leakage() -> None:
-    chain = _load_condition_chains(t_sweep_database_dir(4), 4)[0]
-    records = generate_qa_records([chain])
-    expected_h0_fields = {"id", "hop", "type", "question", "answer"}
-    expected_relational_fields = expected_h0_fields | {"support_fact_ids"}
-
-    for record in records["H0"]:
-        assert set(record) == expected_h0_fields
-    for hop in (1, 2, 3):
-        for record in records[f"H{hop}"]:
-            assert set(record) == expected_relational_fields
-
-    for hop_records in records.values():
-        for record in hop_records:
-            lowercase_question = record["question"].lower()
-            for forbidden in (
-                "table_",
-                "p00_",
-                "rowid",
-                "sqlite",
-                " sql ",
-                "t4",
-                "t8",
-                "t12",
-                "n5k",
-                "n10k",
-                "n20k",
-                str(PROJECT_ROOT).lower(),
-            ):
-                assert forbidden not in lowercase_question
-
-
-def test_qa_condition_generation_is_deterministic(
-    tmp_path: Path,
-    default_config: dict[str, Any],
-    small_world: dict[str, Any],
+def test_semantic_academic_schema_is_reconstructed_from_temporary_sqlite(
+    qa_condition: dict[str, Any],
 ) -> None:
-    database_path, database_manifest_path, _, _, _ = (
-        _build_serialized_test_condition(tmp_path, default_config, small_world)
-    )
-    output_paths = {
-        hop: tmp_path / f"{hop}.jsonl" for hop in ("H0", "H1", "H2", "H3")
+    chains = qa_condition["chains"]
+    assert len(chains) == 250
+    for chain_index, chain in enumerate(chains):
+        assert chain["chain_index"] == chain_index
+        assert [entity["entity_type"] for entity in chain["entities"]] == [
+            spec["entity_type"] for spec in SEMANTIC_ENTITY_SPECS
+        ]
+        assert all(entity["natural_anchor"] for entity in chain["entities"])
+        assert all(
+            chain["entities"][position]["relation_target_id"]
+            == chain["entities"][position - 1]["entity_id"]
+            for position in range(1, 12)
+        )
+
+
+def test_deterministic_150_50_50_chain_split_is_disjoint_and_nested_friendly() -> None:
+    assignments = assign_chain_splits(250)
+    assert {name: len(indices) for name, indices in assignments.items()} == {
+        "reserved": 150,
+        "validation": 50,
+        "test": 50,
     }
-    qa_manifest_path = tmp_path / "qa_manifest.json"
-    first_manifest = generate_condition_qa(
-        default_config,
-        database_path,
-        database_manifest_path,
-        output_paths,
-        expected_table_count=4,
-        expected_logical_fact_count=200,
-    )
-    write_json(qa_manifest_path, first_manifest)
-    first_bytes = {
-        path: path.read_bytes()
-        for path in (*output_paths.values(), qa_manifest_path)
+    assert assignments["reserved"][:6] == [0, 1, 2, 5, 6, 7]
+    assert assignments["validation"][:3] == [3, 8, 13]
+    assert assignments["test"][:3] == [4, 9, 14]
+    assert not set(assignments["validation"]) & set(assignments["test"])
+    assert assign_chain_splits(125) == {
+        split: [index for index in indices if index < 125]
+        for split, indices in assignments.items()
     }
 
-    second_manifest = generate_condition_qa(
-        default_config,
-        database_path,
-        database_manifest_path,
-        output_paths,
-        expected_table_count=4,
-        expected_logical_fact_count=200,
+
+@pytest.mark.parametrize("split", ["validation", "test"])
+def test_candidate_counts_and_retained_record_schema(
+    qa_condition: dict[str, Any], split: str
+) -> None:
+    manifest = qa_condition["result"][f"{split}_manifest"]
+    assert {
+        hop: manifest["counts"][hop]["candidate_count"] for hop in HOP_NAMES
+    } == {"H0": 1300, "H1": 450, "H2": 350, "H3": 300}
+    assert manifest["candidate_total"] == 2400
+    assert manifest["zero_context"] is True
+    records = _records_for_split(qa_condition["output_dir"], split)
+    expected_h0_fields = {
+        "id",
+        "split",
+        "hop",
+        "question",
+        "gold_answer",
+        "fact_type",
+        "source_entity_type",
+        "target_entity_type",
+        "target_field",
+    }
+    expected_relational_fields = expected_h0_fields - {"fact_type"} | {
+        "support_fact_ids"
+    }
+    assert all(set(record) == expected_h0_fields for record in records["H0"])
+    for hop in (1, 2, 3):
+        assert all(set(record) == expected_relational_fields for record in records[f"H{hop}"])
+        assert all(record["hop"] == hop for record in records[f"H{hop}"])
+
+
+def test_h0_candidate_fact_selection_and_non_tautological_exclusions(
+    qa_condition: dict[str, Any],
+) -> None:
+    assignments = assign_chain_splits(250)
+    candidates = generate_qa_candidates(
+        qa_condition["chains"], assignments["validation"], "validation"
     )
-    write_json(qa_manifest_path, second_manifest)
-    assert second_manifest == first_manifest
-    assert all(path.read_bytes() == content for path, content in first_bytes.items())
-    assert first_manifest["h0_definition"] == "attribute_and_direct_relation_facts"
-    assert first_manifest["h0_attribute_count"] == 85
-    assert first_manifest["h0_relation_count"] == 55
-    assert first_manifest["H0_count"] == 140
-    assert first_manifest["H1_count"] == 55
-    assert first_manifest["H2_count"] == 50
-    assert first_manifest["H3_count"] == 45
-    assert first_manifest["total_QA_count"] == 290
-    for hop in ("H0", "H1", "H2", "H3"):
-        assert first_manifest[f"{hop}_sha256"] == hash_file(output_paths[hop])
+    attribute_records = [
+        record for record in candidates["H0"] if record["fact_type"] == "attribute"
+    ]
+    relation_records = [
+        record for record in candidates["H0"] if record["fact_type"] == "relation"
+    ]
+    assert len(attribute_records) == 17 * 50
+    assert len(relation_records) == 9 * 50
+    excluded_anchor_fields = {
+        *NATURAL_IDENTIFIER_FIELDS.values(),
+        "section_label",
+        "academic_term",
+    }
+    assert not {record["target_field"] for record in attribute_records} & excluded_anchor_fields
+    assert not any(
+        record["source_entity_type"] in {"course_offering", "enrollment"}
+        for record in relation_records
+    )
 
 
-def test_no_duplicate_n10k_qa_directory() -> None:
-    assert n_sweep_qa_dir(10_000) == t_sweep_qa_dir(8)
-    assert not (n_sweep_qa_dir(5_000).parent / "N10K").exists()
+def test_relational_questions_have_exact_declared_hop_depths(
+    qa_condition: dict[str, Any],
+) -> None:
+    records = _records_for_split(qa_condition["output_dir"], "validation")
+    expected_pairs = {
+        "H1": {
+            "country": "continent",
+            "region": "country",
+            "city": "region",
+            "campus": "city",
+            "school": "campus",
+            "department": "school",
+            "subject": "department",
+            "course": "subject",
+            "student": "enrollment",
+        },
+        "H2": {
+            "region": "continent",
+            "city": "country",
+            "campus": "region",
+            "school": "city",
+            "department": "campus",
+            "subject": "school",
+            "course": "department",
+        },
+        "H3": {
+            "city": "continent",
+            "campus": "country",
+            "school": "region",
+            "department": "city",
+            "subject": "campus",
+            "course": "school",
+        },
+    }
+    for hop_name, pairs in expected_pairs.items():
+        assert {
+            record["source_entity_type"] for record in records[hop_name]
+        } == set(pairs)
+        assert all(
+            record["target_entity_type"] == pairs[record["source_entity_type"]]
+            for record in records[hop_name]
+        )
 
 
-def test_optional_n40k_qa_placeholders_remain_empty() -> None:
-    qa_dir = n_sweep_qa_dir(40_000)
-    for filename in ("H0.jsonl", "H1.jsonl", "H2.jsonl", "H3.jsonl", "manifest.json"):
-        assert (qa_dir / filename).stat().st_size == 0
+@pytest.mark.parametrize("split", ["validation", "test"])
+def test_support_ids_resolve_to_retained_h0_and_no_model_facing_leakage(
+    qa_condition: dict[str, Any], split: str
+) -> None:
+    records = _records_for_split(qa_condition["output_dir"], split)
+    h0_ids = {record["id"] for record in records["H0"]}
+    raw_ids = {
+        entity["entity_id"]
+        for chain in qa_condition["chains"]
+        for entity in chain["entities"]
+    }
+    for hop_name, hop_records in records.items():
+        for record in hop_records:
+            assert record["split"] == split
+            assert "context" not in record
+            assert not answer_is_in_question(record["question"], record["gold_answer"])
+            assert RAW_ENTITY_IDENTIFIER.search(record["question"]) is None
+            assert RAW_ENTITY_IDENTIFIER.search(record["gold_answer"]) is None
+            assert not any(raw_id in record["question"] for raw_id in raw_ids)
+            assert not any(raw_id in record["gold_answer"] for raw_id in raw_ids)
+            assert "previous-entity" not in record["question"]
+            assert "attribute_" not in record["question"]
+            if hop_name != "H0":
+                assert len(record["support_fact_ids"]) == record["hop"] + 1
+                assert set(record["support_fact_ids"]) <= h0_ids
 
 
-def test_preflight_qa_baseline_and_skill_training_populated() -> None:
+def test_natural_anchors_and_exact_database_answers_are_used(
+    qa_condition: dict[str, Any],
+) -> None:
+    validation_chain = qa_condition["chains"][3]
+    continent, country = validation_chain["entities"][:2]
+    records = _records_for_split(qa_condition["output_dir"], "validation")
+    country_questions = [
+        record for record in records["H0"] if country["natural_anchor"] in record["question"]
+    ]
+    assert country_questions
+    relation = next(
+        record
+        for record in country_questions
+        if record["fact_type"] == "relation"
+    )
+    assert relation["question"] == (
+        f"Which continent does {country['natural_anchor']} belong to?"
+    )
+    assert relation["gold_answer"] == continent["natural_anchor"]
+
+
+def test_strict_leakage_filter_and_support_closure(
+    qa_condition: dict[str, Any],
+) -> None:
+    candidates = generate_qa_candidates(
+        qa_condition["chains"], [3], "validation"
+    )
+    supported_relational = candidates["H1"][0]
+    support_to_remove = supported_relational["support_fact_ids"][-1]
+    leaking_h0 = next(
+        record for record in candidates["H0"] if record["id"] == support_to_remove
+    )
+    leaking_h0["question"] += f" {leaking_h0['gold_answer']}"
+    directly_leaking_relational = candidates["H1"][1]
+    directly_leaking_relational["question"] += (
+        f" {directly_leaking_relational['gold_answer']}"
+    )
+
+    retained, audit = filter_qa_candidates(candidates)
+    retained_ids = {
+        record["id"] for hop_records in retained.values() for record in hop_records
+    }
+    assert leaking_h0["id"] not in retained_ids
+    assert directly_leaking_relational["id"] not in retained_ids
+    assert all(
+        support_to_remove not in record["support_fact_ids"]
+        for hop_name in HOP_NAMES[1:]
+        for record in retained[hop_name]
+    )
+    exclusions = {item["id"]: item for item in audit["excluded_items"]}
+    assert exclusions[leaking_h0["id"]]["reason"] == (
+        "gold_answer_contained_in_normalized_question"
+    )
+    assert exclusions[directly_leaking_relational["id"]]["reason"] == (
+        "gold_answer_contained_in_normalized_question"
+    )
+    closure_exclusions = [
+        item
+        for item in audit["excluded_items"]
+        if item["reason"] == "required_h0_support_not_retained"
+    ]
+    assert closure_exclusions
+    assert all(
+        support_to_remove in item["missing_support_fact_ids"]
+        for item in closure_exclusions
+    )
+
+
+def test_split_manifests_record_filtering_provenance_and_file_hashes(
+    qa_condition: dict[str, Any],
+) -> None:
+    output_dir = qa_condition["output_dir"]
+    split_manifest = read_json(output_dir / "split_manifest.json")
+    assert split_manifest["reserved_chain_count"] == 150
+    assert split_manifest["validation_chain_count"] == 50
+    assert split_manifest["test_chain_count"] == 50
+    assert split_manifest["target_qa_training_generated"] is False
+    assert split_manifest["zero_context"] is True
+    assert not (output_dir / "train").exists()
+    for split in ("validation", "test"):
+        manifest_path = output_dir / split / "manifest.json"
+        manifest = read_json(manifest_path)
+        assert manifest["candidate_total"] == 2400
+        assert isinstance(manifest["excluded_items"], list)
+        for hop_name in HOP_NAMES:
+            counts = manifest["counts"][hop_name]
+            assert counts["candidate_count"] == {
+                "H0": 1300,
+                "H1": 450,
+                "H2": 350,
+                "H3": 300,
+            }[hop_name]
+            assert counts["final_retained_count"] == (
+                counts["candidate_count"]
+                - counts["leakage_filtered_count"]
+                - counts["support_closure_filtered_count"]
+            )
+            path = output_dir / split / f"{hop_name}.jsonl"
+            assert manifest["output_file_hashes"][path.name] == hash_file(path)
+
+
+def test_condition_generation_is_byte_deterministic(
+    qa_condition: dict[str, Any], default_config: dict[str, Any]
+) -> None:
+    second_output = qa_condition["root"] / "qa_second"
+    second_result = generate_condition_qa(
+        default_config,
+        qa_condition["database_path"],
+        qa_condition["database_manifest_path"],
+        second_output,
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
+    )
+    assert second_result == qa_condition["result"]
+    first_output = qa_condition["output_dir"]
+    relative_files = [
+        Path("split_manifest.json"),
+        *(
+            Path(split) / filename
+            for split in ("validation", "test")
+            for filename in (*[f"{hop}.jsonl" for hop in HOP_NAMES], "manifest.json")
+        ),
+    ]
+    assert all(
+        (first_output / relative).read_bytes() == (second_output / relative).read_bytes()
+        for relative in relative_files
+    )
+
+
+def test_database_manifest_tampering_fails_before_output(
+    qa_condition: dict[str, Any], default_config: dict[str, Any]
+) -> None:
+    tampered_path = qa_condition["root"] / "tampered_manifest.json"
+    tampered = read_json(qa_condition["database_manifest_path"])
+    tampered["database_sha256"] = "0" * 64
+    write_json(tampered_path, tampered)
+    output_dir = qa_condition["root"] / "tampered_output"
+    with pytest.raises(ValueError, match="manifest hash"):
+        generate_condition_qa(
+            default_config,
+            qa_condition["database_path"],
+            tampered_path,
+            output_dir,
+            expected_table_count=12,
+            expected_logical_fact_count=10_000,
+        )
+    assert not output_dir.exists()
+
+
+def test_obsolete_opaque_qa_assumptions_are_removed() -> None:
+    source = (PROJECT_ROOT / "src" / "data" / "qa.py").read_text(encoding="utf-8")
+    for obsolete in ("pXX", "attribute_0", "previous_entity", "table_00"):
+        assert obsolete not in source
+
+
+def test_preflight_qa_artifacts_are_preserved() -> None:
     preflight_dir = EXP01_QA_DIR / "preflight_relational_qa"
-    baseline_dir = preflight_dir / "baseline"
-    for filename in ("H1.jsonl", "H2.jsonl", "H3.jsonl", "manifest.json"):
-        assert (baseline_dir / filename).stat().st_size > 0
-
-    skill_training_dir = preflight_dir / "skill_training"
-    for filename in ("train.jsonl", "val.jsonl", "manifest.json"):
-        assert (skill_training_dir / filename).stat().st_size > 0
+    for relative_path in (
+        "baseline/H1.jsonl",
+        "baseline/H2.jsonl",
+        "baseline/H3.jsonl",
+        "baseline/manifest.json",
+        "skill_training/train.jsonl",
+        "skill_training/val.jsonl",
+        "skill_training/manifest.json",
+    ):
+        assert (preflight_dir / relative_path).stat().st_size > 0

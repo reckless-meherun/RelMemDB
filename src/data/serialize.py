@@ -410,6 +410,30 @@ def _assign_natural_anchors(
             entity["natural_anchor"] = anchor
 
 
+def read_semantic_database(
+    database_path: str | Path,
+    database_manifest: dict[str, Any],
+) -> tuple[
+    list[dict[str, Any]],
+    dict[int, dict[str, dict[str, Any]]],
+    dict[str, Any],
+]:
+    """Read and validate semantic entities using the materialized schema layout."""
+    path = Path(database_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"database file is missing or empty: {path}")
+    partition = _validated_position_partition(database_manifest)
+    connection = sqlite3.connect(path)
+    try:
+        physical_groups, entities_by_position, metadata = _read_logical_entities(
+            connection, partition
+        )
+    finally:
+        connection.close()
+    _assign_natural_anchors(entities_by_position)
+    return physical_groups, entities_by_position, metadata
+
+
 def _attribute_fact(entity: dict[str, Any], field: str) -> tuple[str, ...]:
     value = entity["attributes"][field]
     value_type = "integer" if isinstance(value, int) else "text"
@@ -590,18 +614,9 @@ def build_readable_database_book(
     database_path: str | Path,
     database_manifest: dict[str, Any],
 ) -> tuple[str, dict[str, Any]]:
-    path = Path(database_path)
-    if not path.is_file() or path.stat().st_size == 0:
-        raise FileNotFoundError(f"database file is missing or empty: {path}")
-    partition = _validated_position_partition(database_manifest)
-    connection = sqlite3.connect(path)
-    try:
-        physical_groups, entities_by_position, metadata = _read_logical_entities(
-            connection, partition
-        )
-    finally:
-        connection.close()
-    _assign_natural_anchors(entities_by_position)
+    physical_groups, entities_by_position, metadata = read_semantic_database(
+        database_path, database_manifest
+    )
 
     lines = [
         "The Academic Database Book",
