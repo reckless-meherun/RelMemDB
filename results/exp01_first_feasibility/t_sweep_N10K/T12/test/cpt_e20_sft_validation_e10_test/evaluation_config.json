@@ -1,0 +1,36 @@
+{
+  "N": 10000,
+  "T": 12,
+  "batch_size": 32,
+  "checkpoint_config_sha256": "7cbb07dbfcb69896f3a91cc87e7e00a61e841e75511d452d68fbdb0e065f701b",
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_cpt_t12_n10k_e20_sft_validation_e10",
+  "context_length": 256,
+  "decoding": {
+    "continuation_only": true,
+    "do_sample": false,
+    "num_beams": 1,
+    "pad_token_policy": "eos_if_missing",
+    "padding_side": "left",
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "experiment_name": "exp01_first_feasibility",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_cpt_t12_n10k_e20_sft_validation_e10",
+  "primary_metric": "normalized_exact_match",
+  "prompt_format": "Question:\n{question}\n\nAnswer:",
+  "qa_input_hashes": {
+    "H0": "a1208001da2fcddd718de5f0e66b3d563516f4a23ecb47c35c772871079d7d94",
+    "H1": "5bf88dd5768faa354cd52a8c95049044a0dcf9ac7ef433112116ef418b1465b1",
+    "H2": "bd3b762a08789cc156b1dcbda480675963a5cab70db1efffbc892e3fa22bbd62",
+    "H3": "c690c9d990ff6b33c76c6dc95806e8e71f223f66c89ca52646ce6fbf7240aef3"
+  },
+  "qa_manifest_sha256": "182ada4d4ea0ca4ffc146dbe6d8138df3e3fc1f426fa20960adb7aa7eb36c878",
+  "qa_record_count": 2353,
+  "qa_split_manifest_sha256": "08b2dbeca48e2d42cae466062699d87ccec9bb45218bf3eea280ccf5423db7df",
+  "run_name": "cpt_e20_sft_validation_e10_test",
+  "seed": 2025,
+  "split": "test",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_cpt_t12_n10k_e20_sft_validation_e10",
+  "zero_context": true
+}

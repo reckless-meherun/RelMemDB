@@ -1,0 +1,431 @@
+{
+  "by_hop": {
+    "H0": {
+      "count": 1289,
+      "normalized_exact_match_accuracy": 0.11481768813033359,
+      "normalized_exact_match_correct": 148,
+      "strict_exact_match_accuracy": 0.11481768813033359,
+      "strict_exact_match_correct": 148
+    },
+    "H1": {
+      "count": 429,
+      "normalized_exact_match_accuracy": 0.14918414918414918,
+      "normalized_exact_match_correct": 64,
+      "strict_exact_match_accuracy": 0.14918414918414918,
+      "strict_exact_match_correct": 64
+    },
+    "H2": {
+      "count": 337,
+      "normalized_exact_match_accuracy": 0.1661721068249258,
+      "normalized_exact_match_correct": 56,
+      "strict_exact_match_accuracy": 0.1661721068249258,
+      "strict_exact_match_correct": 56
+    },
+    "H3": {
+      "count": 298,
+      "normalized_exact_match_accuracy": 0.1644295302013423,
+      "normalized_exact_match_correct": 49,
+      "strict_exact_match_accuracy": 0.1644295302013423,
+      "strict_exact_match_correct": 49
+    }
+  },
+  "by_target_field": {
+    "administrative_type": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.14,
+      "normalized_exact_match_correct": 28,
+      "strict_exact_match_accuracy": 0.14,
+      "strict_exact_match_correct": 28
+    },
+    "campus_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "campus_type": {
+      "count": 195,
+      "normalized_exact_match_accuracy": 0.17435897435897435,
+      "normalized_exact_match_correct": 34,
+      "strict_exact_match_accuracy": 0.17435897435897435,
+      "strict_exact_match_correct": 34
+    },
+    "city_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "climate_band": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.22,
+      "normalized_exact_match_correct": 44,
+      "strict_exact_match_accuracy": 0.22,
+      "strict_exact_match_correct": 44
+    },
+    "continent_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "country_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "credit_hours": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.2,
+      "normalized_exact_match_correct": 10,
+      "strict_exact_match_accuracy": 0.2,
+      "strict_exact_match_correct": 10
+    },
+    "currency_name": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.04,
+      "normalized_exact_match_correct": 8,
+      "strict_exact_match_accuracy": 0.04,
+      "strict_exact_match_correct": 8
+    },
+    "delivery_mode": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.26,
+      "normalized_exact_match_correct": 13,
+      "strict_exact_match_accuracy": 0.26,
+      "strict_exact_match_correct": 13
+    },
+    "department_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "discipline_group": {
+      "count": 91,
+      "normalized_exact_match_accuracy": 0.0989010989010989,
+      "normalized_exact_match_correct": 9,
+      "strict_exact_match_accuracy": 0.0989010989010989,
+      "strict_exact_match_correct": 9
+    },
+    "enrollment_status": {
+      "count": 100,
+      "normalized_exact_match_accuracy": 0.19,
+      "normalized_exact_match_correct": 19,
+      "strict_exact_match_accuracy": 0.19,
+      "strict_exact_match_correct": 19
+    },
+    "final_grade": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.18,
+      "normalized_exact_match_correct": 9,
+      "strict_exact_match_accuracy": 0.18,
+      "strict_exact_match_correct": 9
+    },
+    "focus_area": {
+      "count": 117,
+      "normalized_exact_match_accuracy": 0.1282051282051282,
+      "normalized_exact_match_correct": 15,
+      "strict_exact_match_accuracy": 0.1282051282051282,
+      "strict_exact_match_correct": 15
+    },
+    "founding_period": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.215,
+      "normalized_exact_match_correct": 43,
+      "strict_exact_match_accuracy": 0.215,
+      "strict_exact_match_correct": 43
+    },
+    "meeting_period": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.2,
+      "normalized_exact_match_correct": 10,
+      "strict_exact_match_accuracy": 0.2,
+      "strict_exact_match_correct": 10
+    },
+    "natural_anchor": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "population_band": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.205,
+      "normalized_exact_match_correct": 41,
+      "strict_exact_match_accuracy": 0.205,
+      "strict_exact_match_correct": 41
+    },
+    "region_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "room_label": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "scholarship_status": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.26,
+      "normalized_exact_match_correct": 13,
+      "strict_exact_match_accuracy": 0.26,
+      "strict_exact_match_correct": 13
+    },
+    "school_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "study_year": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.16,
+      "normalized_exact_match_correct": 8,
+      "strict_exact_match_accuracy": 0.16,
+      "strict_exact_match_correct": 8
+    },
+    "subject_level": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.26,
+      "normalized_exact_match_correct": 13,
+      "strict_exact_match_accuracy": 0.26,
+      "strict_exact_match_correct": 13
+    },
+    "subject_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "conditional_relational_accuracy": {
+    "H1": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 429
+    },
+    "H2": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 337
+    },
+    "H3": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 298
+    }
+  },
+  "h0_by_fact_type": {
+    "attribute": {
+      "count": 839,
+      "normalized_exact_match_accuracy": 0.1764004767580453,
+      "normalized_exact_match_correct": 148,
+      "strict_exact_match_accuracy": 0.1764004767580453,
+      "strict_exact_match_correct": 148
+    },
+    "relation": {
+      "count": 450,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "majority_gold_answer_baseline": {
+    "by_target_field": {
+      "administrative_type": {
+        "accuracy": 0.32,
+        "correct_count": 64,
+        "count": 200,
+        "majority_gold_answer": "state"
+      },
+      "campus_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Arden Bright Research Campus"
+      },
+      "campus_type": {
+        "accuracy": 0.28717948717948716,
+        "correct_count": 56,
+        "count": 195,
+        "majority_gold_answer": "suburban"
+      },
+      "city_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Alderstead"
+      },
+      "climate_band": {
+        "accuracy": 0.28,
+        "correct_count": 56,
+        "count": 200,
+        "majority_gold_answer": "cool temperate"
+      },
+      "continent_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Central Ancient Elm Basin"
+      },
+      "country_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Oaken Federation"
+      },
+      "credit_hours": {
+        "accuracy": 0.36,
+        "correct_count": 18,
+        "count": 50,
+        "majority_gold_answer": "3"
+      },
+      "currency_name": {
+        "accuracy": 0.16,
+        "correct_count": 32,
+        "count": 200,
+        "majority_gold_answer": "Cedar crown"
+      },
+      "delivery_mode": {
+        "accuracy": 0.32,
+        "correct_count": 16,
+        "count": 50,
+        "majority_gold_answer": "hybrid"
+      },
+      "department_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder Department of Computing and Markets and Institutions"
+      },
+      "discipline_group": {
+        "accuracy": 0.17582417582417584,
+        "correct_count": 16,
+        "count": 91,
+        "majority_gold_answer": "History"
+      },
+      "enrollment_status": {
+        "accuracy": 0.38,
+        "correct_count": 38,
+        "count": 100,
+        "majority_gold_answer": "deferred"
+      },
+      "final_grade": {
+        "accuracy": 0.18,
+        "correct_count": 9,
+        "count": 50,
+        "majority_gold_answer": "B"
+      },
+      "focus_area": {
+        "accuracy": 0.17094017094017094,
+        "correct_count": 20,
+        "count": 117,
+        "majority_gold_answer": "Ecological Modeling"
+      },
+      "founding_period": {
+        "accuracy": 0.22,
+        "correct_count": 44,
+        "count": 200,
+        "majority_gold_answer": "1950-1974"
+      },
+      "meeting_period": {
+        "accuracy": 0.28,
+        "correct_count": 14,
+        "count": 50,
+        "majority_gold_answer": "Thursday morning"
+      },
+      "natural_anchor": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Autumn 2024 enrollment for Section B08 of Blue Archives and Evidence: Methods in Biology"
+      },
+      "population_band": {
+        "accuracy": 0.28,
+        "correct_count": 56,
+        "count": 200,
+        "majority_gold_answer": "over 3 million"
+      },
+      "region_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Central Ancient Harbor Plateau"
+      },
+      "room_label": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder Hall 330"
+      },
+      "scholarship_status": {
+        "accuracy": 0.3,
+        "correct_count": 15,
+        "count": 50,
+        "majority_gold_answer": "research fellowship"
+      },
+      "school_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder School of Economics and Public Reasoning"
+      },
+      "study_year": {
+        "accuracy": 0.28,
+        "correct_count": 14,
+        "count": 50,
+        "majority_gold_answer": "second year"
+      },
+      "subject_level": {
+        "accuracy": 0.28,
+        "correct_count": 14,
+        "count": 50,
+        "majority_gold_answer": "intermediate"
+      },
+      "subject_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Archives and Evidence in Economics"
+      }
+    },
+    "macro_accuracy": 0.1720747628439936
+  },
+  "overall": {
+    "count": 2353,
+    "normalized_exact_match_accuracy": 0.13472163195920103,
+    "normalized_exact_match_correct": 317,
+    "strict_exact_match_accuracy": 0.13472163195920103,
+    "strict_exact_match_correct": 317
+  },
+  "primary_metric": "normalized_exact_match",
+  "target_field_macro_average": {
+    "normalized_exact_match_accuracy": 0.11274866159481546,
+    "strict_exact_match_accuracy": 0.11274866159481546
+  }
+}
