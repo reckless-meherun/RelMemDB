@@ -97,7 +97,28 @@ def test_default_experiment_config() -> None:
     }
     assert config["training"]["fact_exposure"] == 4
     assert config["training"]["cpt_batch_size"] == 32
-    assert config["training"]["cpt_epochs"] == 10
+    assert config["training"] == {
+        "fact_exposure": 4,
+        "cpt_batch_size": 32,
+        "cpt_epochs": 20,
+        "gradient_accumulation_steps": 1,
+        "optimizer": "adamw",
+        "learning_rate": 3e-5,
+        "weight_decay": 0.01,
+        "betas": [0.9, 0.999],
+        "epsilon": 1e-8,
+        "scheduler": "cosine",
+        "warmup_ratio": 0.05,
+        "max_grad_norm": 1.0,
+        "context_length": 512,
+        "precision": "bf16",
+        "shuffle": True,
+        "gradient_checkpointing": False,
+        "fused_optimizer": True,
+        "dataloader_workers": 2,
+        "pin_memory": True,
+        "drop_last": False,
+    }
     assert config["evaluation"] == {
         "decoding": "greedy",
         "temperature": 0.0,

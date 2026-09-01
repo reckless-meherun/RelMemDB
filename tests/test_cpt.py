@@ -20,7 +20,10 @@ from data.serialize import (
 from data.world import build_master_world
 from training.cpt import (
     CPTArtifactError,
+    _build_adamw_optimizer,
+    _configure_gradient_checkpointing,
     _iterate_cpt_batches,
+    _seeded_dataloader_generator,
     build_cpt_training_plan,
     chunk_token_ids,
     enable_full_parameter_training,
@@ -522,36 +525,226 @@ def test_exact_multiple_has_no_partial_chunk() -> None:
     assert statistics["padding_token_count"] == 0
 
 
-def test_training_plan_uses_ten_full_epochs(cpt_config: dict[str, Any]) -> None:
+def test_training_plan_uses_configured_main_cpt_values(
+    cpt_config: dict[str, Any],
+) -> None:
     plan = build_cpt_training_plan(
-        cpt_config, table_count=12, fact_count=10_000, sequence_count=1_489
+        cpt_config, table_count=12, fact_count=10_000, sequence_count=745
     )
-    assert plan["epochs"] == plan["passes_over_serialized_corpus"] == 10
+    assert plan["epochs"] == plan["passes_over_serialized_corpus"] == 20
     assert plan["fact_exposure"] == 4
-    assert plan["effective_fact_exposure"] == 40
-    assert plan["context_length"] == 256
+    assert plan["effective_fact_exposure"] == 80
+    assert plan["context_length"] == 512
     assert plan["batch_size"] == 32
-    assert plan["steps_per_epoch"] == 47
-    assert plan["total_optimizer_steps"] == 470
-    assert plan["optimizer_steps"] == 470
+    assert plan["gradient_accumulation_steps"] == 1
+    assert plan["effective_batch_size"] == 32
+    assert plan["micro_batches_per_epoch"] == 24
+    assert plan["steps_per_epoch"] == 24
+    assert plan["total_optimizer_steps"] == 480
+    assert plan["optimizer_steps"] == 480
     assert plan["warmup_steps"] == 24
     assert plan["optimizer"] == "AdamW"
+    assert plan["learning_rate"] == 3e-5
     assert plan["betas"] == [0.9, 0.999]
     assert plan["epsilon"] == 1e-8
     assert plan["weight_decay"] == 0.01
     assert plan["scheduler"] == "cosine"
+    assert plan["shuffle"] is True
+    assert plan["gradient_checkpointing"] is False
+    assert plan["fused_optimizer_requested"] is True
+    assert plan["fused_optimizer_actually_used"] is None
+    assert plan["dataloader_workers"] == 2
+    assert plan["pin_memory"] is True
+    assert plan["drop_last"] is False
+    assert plan["dropped_sequences_per_epoch"] == 0
+    assert plan["precision"] == "bf16"
+    assert plan["seed"] == 2025
+
+
+def test_training_plan_changes_when_yaml_values_change(
+    cpt_config: dict[str, Any],
+) -> None:
+    training = cpt_config["training"]
+    training.update(
+        {
+            "fact_exposure": 7,
+            "cpt_batch_size": 7,
+            "cpt_epochs": 3,
+            "gradient_accumulation_steps": 2,
+            "context_length": 128,
+            "optimizer": "adamw",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.02,
+            "betas": [0.8, 0.95],
+            "epsilon": 1e-6,
+            "scheduler": "linear",
+            "warmup_ratio": 0.1,
+            "max_grad_norm": 0.5,
+            "precision": "fp32",
+            "shuffle": False,
+            "gradient_checkpointing": True,
+            "fused_optimizer": False,
+            "dataloader_workers": 0,
+            "pin_memory": False,
+            "drop_last": True,
+        }
+    )
+    plan = build_cpt_training_plan(
+        cpt_config, table_count=8, fact_count=5_000, sequence_count=100
+    )
+
+    assert plan["T"] == 8
+    assert plan["N"] == 5_000
+    assert plan["fact_exposure"] == 7
+    assert plan["epochs"] == 3
+    assert plan["effective_fact_exposure"] == 21
+    assert plan["batch_size"] == 7
+    assert plan["gradient_accumulation_steps"] == 2
+    assert plan["effective_batch_size"] == 14
+    assert plan["context_length"] == 128
+    assert plan["learning_rate"] == 1e-4
+    assert plan["weight_decay"] == 0.02
+    assert plan["betas"] == [0.8, 0.95]
+    assert plan["epsilon"] == 1e-6
+    assert plan["scheduler"] == "linear"
+    assert plan["warmup_ratio"] == 0.1
+    assert plan["warmup_steps"] == 3
+    assert plan["max_grad_norm"] == 0.5
+    assert plan["precision"] == "fp32"
     assert plan["shuffle"] is False
+    assert plan["gradient_checkpointing"] is True
+    assert plan["fused_optimizer_requested"] is False
+    assert plan["dataloader_workers"] == 0
+    assert plan["pin_memory"] is False
+    assert plan["drop_last"] is True
+    assert plan["trained_sequence_count_per_epoch"] == 98
+    assert plan["dropped_sequences_per_epoch"] == 2
+    assert plan["micro_batches_per_epoch"] == 14
+    assert plan["steps_per_epoch"] == 7
+    assert plan["optimizer_steps"] == 21
 
 
-def test_epoch_iterator_repeats_the_complete_loader_exactly_ten_times() -> None:
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("cpt_batch_size", 0, "positive integer"),
+        ("gradient_accumulation_steps", 0, "positive integer"),
+        ("learning_rate", 0.0, "must be positive"),
+        ("weight_decay", -0.01, "must be non-negative"),
+        ("betas", [1.0, 0.999], r"betas\[0\].*\[0, 1\)"),
+        ("epsilon", 0.0, "must be positive"),
+        ("scheduler", "plateau", "unsupported training.scheduler"),
+        ("precision", "int8", "unsupported training.precision"),
+        ("shuffle", "yes", "must be a boolean"),
+        ("dataloader_workers", -1, "non-negative integer"),
+    ],
+)
+def test_invalid_training_plan_values_fail_clearly(
+    cpt_config: dict[str, Any], key: str, value: Any, message: str
+) -> None:
+    cpt_config["training"][key] = value
+    with pytest.raises(ValueError, match=message):
+        build_cpt_training_plan(
+            cpt_config, table_count=12, fact_count=10_000, sequence_count=745
+        )
+
+
+def test_drop_last_cannot_discard_the_complete_corpus(
+    cpt_config: dict[str, Any],
+) -> None:
+    cpt_config["training"]["drop_last"] = True
+    cpt_config["training"]["cpt_batch_size"] = 64
+    with pytest.raises(ValueError, match="discard every CPT sequence"):
+        build_cpt_training_plan(
+            cpt_config, table_count=12, fact_count=10_000, sequence_count=32
+        )
+
+
+def test_seeded_dataloader_shuffling_is_deterministic() -> None:
+    torch = pytest.importorskip("torch")
+    DataLoader = torch.utils.data.DataLoader
+
+    def epoch_orders(seed: int) -> list[list[int]]:
+        generator = _seeded_dataloader_generator(torch, seed)
+        loader = DataLoader(
+            list(range(20)), batch_size=4, shuffle=True, generator=generator
+        )
+        return [
+            [value for batch in loader for value in batch.tolist()]
+            for _ in range(3)
+        ]
+
+    first = epoch_orders(2025)
+    second = epoch_orders(2025)
+    assert first == second
+    assert first != epoch_orders(2026)
+    assert len({tuple(order) for order in first}) == 3
+
+
+def test_fused_adamw_falls_back_and_records_actual_mode(
+    cpt_config: dict[str, Any],
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class FakeAdamW:
+        def __init__(self, parameters: list[Any], **kwargs: Any) -> None:
+            assert parameters == ["parameter"]
+            calls.append(kwargs)
+            if kwargs.get("fused"):
+                raise TypeError("fused mode unavailable")
+            self.defaults = kwargs
+
+    class FakeTorch:
+        class optim:
+            AdamW = FakeAdamW
+
+    plan = build_cpt_training_plan(
+        cpt_config, table_count=12, fact_count=10_000, sequence_count=745
+    )
+    optimizer, actually_used, fallback_reason = _build_adamw_optimizer(
+        FakeTorch, ["parameter"], plan
+    )
+
+    assert isinstance(optimizer, FakeAdamW)
+    assert actually_used is False
+    assert fallback_reason == "TypeError: fused mode unavailable"
+    assert calls[0]["fused"] is True
+    assert "fused" not in calls[1]
+    assert calls[1]["lr"] == 3e-5
+    assert calls[1]["weight_decay"] == 0.01
+    assert calls[1]["betas"] == (0.9, 0.999)
+    assert calls[1]["eps"] == 1e-8
+
+
+def test_gradient_checkpointing_is_enabled_and_disabled_explicitly() -> None:
+    class FakeCheckpointModel:
+        is_gradient_checkpointing = False
+
+        def gradient_checkpointing_enable(self) -> None:
+            self.is_gradient_checkpointing = True
+
+        def gradient_checkpointing_disable(self) -> None:
+            self.is_gradient_checkpointing = False
+
+    model = FakeCheckpointModel()
+    _configure_gradient_checkpointing(model, True)
+    assert model.is_gradient_checkpointing is True
+    _configure_gradient_checkpointing(model, False)
+    assert model.is_gradient_checkpointing is False
+
+    with pytest.raises(RuntimeError, match="does not support"):
+        _configure_gradient_checkpointing(object(), True)
+
+
+def test_epoch_iterator_repeats_the_complete_loader_for_configured_epochs() -> None:
     loader = ["first", "second", "third"]
-    batches = list(_iterate_cpt_batches(loader, 10))
-    assert len(batches) == 30
+    batches = list(_iterate_cpt_batches(loader, 20))
+    assert len(batches) == 60
     assert [epoch for epoch, _, _ in batches] == [
-        epoch for epoch in range(1, 11) for _ in loader
+        epoch for epoch in range(1, 21) for _ in loader
     ]
-    assert [step for _, step, _ in batches] == list(range(1, 4)) * 10
-    assert [batch for _, _, batch in batches] == loader * 10
+    assert [step for _, step, _ in batches] == list(range(1, 4)) * 20
+    assert [batch for _, _, batch in batches] == loader * 20
 
 
 def test_cpt_enables_every_model_parameter() -> None:
@@ -577,9 +770,9 @@ def test_canonical_cpt_and_run_path_resolution() -> None:
     assert paths["readable_book"] == condition / "cpt" / "book_readable.txt"
     assert paths["train_text"] == condition / "cpt" / "train.txt"
     assert paths["cpt_manifest"] == condition / "cpt" / "manifest.json"
-    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k_e10"
-    assert paths["run_config"].name.endswith("L12_E10_config_PLACEHOLDER.yaml")
-    assert paths["train_log"].name.endswith("L12_E10_trainlog_PLACEHOLDER.jsonl")
+    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k_e20"
+    assert paths["run_config"].name.endswith("L12_E20_config_PLACEHOLDER.yaml")
+    assert paths["train_log"].name.endswith("L12_E20_trainlog_PLACEHOLDER.jsonl")
 
 
 def test_source_checkpoint_must_exist(tmp_path: Path) -> None:

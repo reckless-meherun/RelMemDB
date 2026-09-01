@@ -249,6 +249,14 @@ def validate_config(config: dict[str, Any]) -> None:
         _required(training, "cpt_epochs", "training"),
         "training.cpt_epochs",
     )
+    _require_positive_int(
+        _required(training, "gradient_accumulation_steps", "training"),
+        "training.gradient_accumulation_steps",
+    )
+    _require_non_negative_int(
+        _required(training, "dataloader_workers", "training"),
+        "training.dataloader_workers",
+    )
     warmup_ratio = _require_number(
         _required(training, "warmup_ratio", "training"), "training.warmup_ratio"
     )
@@ -259,22 +267,57 @@ def validate_config(config: dict[str, Any]) -> None:
     )
     if learning_rate <= 0:
         raise ConfigError("training.learning_rate must be positive")
+    weight_decay = _require_number(
+        _required(training, "weight_decay", "training"), "training.weight_decay"
+    )
+    if weight_decay < 0:
+        raise ConfigError("training.weight_decay must be non-negative")
+    epsilon = _require_number(
+        _required(training, "epsilon", "training"), "training.epsilon"
+    )
+    if epsilon <= 0:
+        raise ConfigError("training.epsilon must be positive")
+    betas = _required(training, "betas", "training")
+    if not isinstance(betas, list) or len(betas) != 2:
+        raise ConfigError("training.betas must contain exactly two numbers")
+    for index, beta in enumerate(betas):
+        beta_value = _require_number(beta, f"training.betas[{index}]")
+        if not 0.0 <= beta_value < 1.0:
+            raise ConfigError(f"training.betas[{index}] must be in [0, 1)")
     max_grad_norm = _require_number(
         _required(training, "max_grad_norm", "training"), "training.max_grad_norm"
     )
     if max_grad_norm <= 0:
         raise ConfigError("training.max_grad_norm must be positive")
-    training_context = _require_positive_int(
+    _require_positive_int(
         _required(training, "context_length", "training"), "training.context_length"
     )
-    if training_context != model["context_length"]:
-        raise ConfigError("model and training context lengths must match")
     for key in ("optimizer", "scheduler", "precision"):
         value = _required(training, key, "training")
         if not isinstance(value, str) or not value.strip():
             raise ConfigError(f"training.{key} must be a non-empty string")
-    if training["precision"] != model["precision"]:
-        raise ConfigError("model and training precision must match")
+    if training["optimizer"].lower() != "adamw":
+        raise ConfigError("training.optimizer must be adamw")
+    if training["scheduler"].lower() not in {
+        "constant",
+        "constant_with_warmup",
+        "cosine",
+        "linear",
+    }:
+        raise ConfigError(
+            "training.scheduler must be constant, constant_with_warmup, cosine, "
+            "or linear"
+        )
+    if training["precision"].lower() not in {"bf16", "fp16", "fp32"}:
+        raise ConfigError("training.precision must be bf16, fp16, or fp32")
+    for key in (
+        "shuffle",
+        "gradient_checkpointing",
+        "fused_optimizer",
+        "pin_memory",
+        "drop_last",
+    ):
+        _require_bool(_required(training, key, "training"), f"training.{key}")
 
     for key in ("decoding", "primary_metric"):
         value = _required(evaluation, key, "evaluation")

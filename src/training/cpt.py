@@ -4,6 +4,7 @@ import math
 import random
 import time
 from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +12,14 @@ from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
 
-ADAMW_DEFAULT_WEIGHT_DECAY = 0.01
-ADAMW_DEFAULT_BETAS = (0.9, 0.999)
-ADAMW_DEFAULT_EPSILON = 1e-8
+SUPPORTED_CPT_OPTIMIZERS = {"adamw"}
+SUPPORTED_CPT_SCHEDULERS = {
+    "constant",
+    "constant_with_warmup",
+    "cosine",
+    "linear",
+}
+SUPPORTED_CPT_PRECISIONS = {"bf16", "fp16", "fp32"}
 
 
 class CPTArtifactError(ValueError):
@@ -229,53 +235,148 @@ def build_cpt_training_plan(
     config: dict[str, Any], *, table_count: int, fact_count: int, sequence_count: int
 ) -> dict[str, Any]:
     training = config["training"]
-    if sequence_count <= 0:
+    if (
+        isinstance(sequence_count, bool)
+        or not isinstance(sequence_count, int)
+        or sequence_count <= 0
+    ):
         raise ValueError("sequence_count must be positive")
-    required = {
-        "fact_exposure": 4,
-        "context_length": 256,
-        "optimizer": "adamw",
-        "learning_rate": 5e-5,
-        "scheduler": "cosine",
-        "warmup_ratio": 0.05,
-        "max_grad_norm": 1.0,
-        "precision": "bf16",
-    }
-    for key, expected_value in required.items():
-        actual_value = training[key]
-        if key in {"optimizer", "scheduler", "precision"}:
-            actual_value = str(actual_value).lower()
-        if actual_value != expected_value:
-            raise ValueError(f"CPT requires training.{key}={expected_value!r}")
-    if config["experiment"]["seed"] != 2025:
-        raise ValueError("CPT requires experiment.seed=2025")
-    batch_size = training["cpt_batch_size"]
-    epochs = training["cpt_epochs"]
-    steps_per_epoch = math.ceil(sequence_count / batch_size)
+
+    def positive_int(key: str) -> int:
+        value = training.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"training.{key} must be a positive integer")
+        return value
+
+    def non_negative_int(key: str) -> int:
+        value = training.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"training.{key} must be a non-negative integer")
+        return value
+
+    def boolean(key: str) -> bool:
+        value = training.get(key)
+        if not isinstance(value, bool):
+            raise ValueError(f"training.{key} must be a boolean")
+        return value
+
+    def number(key: str, *, positive: bool, allow_zero: bool = False) -> float:
+        value = training.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"training.{key} must be a number")
+        numeric_value = float(value)
+        if positive and (
+            numeric_value < 0 or (numeric_value == 0 and not allow_zero)
+        ):
+            qualifier = "non-negative" if allow_zero else "positive"
+            raise ValueError(f"training.{key} must be {qualifier}")
+        return numeric_value
+
+    fact_exposure = positive_int("fact_exposure")
+    batch_size = positive_int("cpt_batch_size")
+    epochs = positive_int("cpt_epochs")
+    gradient_accumulation_steps = positive_int("gradient_accumulation_steps")
+    context_length = positive_int("context_length")
+    dataloader_workers = non_negative_int("dataloader_workers")
+    learning_rate = number("learning_rate", positive=True)
+    weight_decay = number("weight_decay", positive=True, allow_zero=True)
+    epsilon = number("epsilon", positive=True)
+    warmup_ratio = number("warmup_ratio", positive=False)
+    max_grad_norm = number("max_grad_norm", positive=True)
+    if not 0.0 <= warmup_ratio <= 1.0:
+        raise ValueError("training.warmup_ratio must be between 0 and 1")
+
+    betas = training.get("betas")
+    if not isinstance(betas, (list, tuple)) or len(betas) != 2:
+        raise ValueError("training.betas must contain exactly two numbers")
+    normalized_betas: list[float] = []
+    for index, beta in enumerate(betas):
+        if isinstance(beta, bool) or not isinstance(beta, (int, float)):
+            raise ValueError(f"training.betas[{index}] must be a number")
+        normalized_beta = float(beta)
+        if not 0.0 <= normalized_beta < 1.0:
+            raise ValueError(f"training.betas[{index}] must be in [0, 1)")
+        normalized_betas.append(normalized_beta)
+
+    optimizer = str(training.get("optimizer", "")).lower()
+    scheduler = str(training.get("scheduler", "")).lower()
+    precision = str(training.get("precision", "")).lower()
+    if optimizer not in SUPPORTED_CPT_OPTIMIZERS:
+        raise ValueError(
+            f"unsupported training.optimizer={optimizer!r}; supported values: "
+            f"{sorted(SUPPORTED_CPT_OPTIMIZERS)}"
+        )
+    if scheduler not in SUPPORTED_CPT_SCHEDULERS:
+        raise ValueError(
+            f"unsupported training.scheduler={scheduler!r}; supported values: "
+            f"{sorted(SUPPORTED_CPT_SCHEDULERS)}"
+        )
+    if precision not in SUPPORTED_CPT_PRECISIONS:
+        raise ValueError(
+            f"unsupported training.precision={precision!r}; supported values: "
+            f"{sorted(SUPPORTED_CPT_PRECISIONS)}"
+        )
+
+    shuffle = boolean("shuffle")
+    gradient_checkpointing = boolean("gradient_checkpointing")
+    fused_optimizer = boolean("fused_optimizer")
+    pin_memory = boolean("pin_memory")
+    drop_last = boolean("drop_last")
+    seed = config.get("experiment", {}).get("seed")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("experiment.seed must be a non-negative integer")
+
+    if drop_last:
+        micro_batches_per_epoch = sequence_count // batch_size
+        trained_sequence_count_per_epoch = micro_batches_per_epoch * batch_size
+    else:
+        micro_batches_per_epoch = math.ceil(sequence_count / batch_size)
+        trained_sequence_count_per_epoch = sequence_count
+    if micro_batches_per_epoch == 0:
+        raise ValueError(
+            "training.drop_last would discard every CPT sequence; reduce "
+            "training.cpt_batch_size or disable drop_last"
+        )
+    steps_per_epoch = math.ceil(
+        micro_batches_per_epoch / gradient_accumulation_steps
+    )
     optimizer_steps = steps_per_epoch * epochs
-    warmup_steps = math.ceil(optimizer_steps * training["warmup_ratio"])
+    warmup_steps = math.ceil(optimizer_steps * warmup_ratio)
     return {
         "stage": "cpt",
         "T": table_count,
         "N": fact_count,
-        "seed": config["experiment"]["seed"],
+        "seed": seed,
         "epochs": epochs,
         "passes_over_serialized_corpus": epochs,
-        "fact_exposure": training["fact_exposure"],
-        "effective_fact_exposure": training["fact_exposure"] * epochs,
-        "context_length": training["context_length"],
+        "fact_exposure": fact_exposure,
+        "effective_fact_exposure": fact_exposure * epochs,
+        "context_length": context_length,
         "batch_size": batch_size,
-        "shuffle": False,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "effective_batch_size": batch_size * gradient_accumulation_steps,
+        "shuffle": shuffle,
+        "gradient_checkpointing": gradient_checkpointing,
+        "dataloader_workers": dataloader_workers,
+        "pin_memory": pin_memory,
+        "drop_last": drop_last,
+        "trained_sequence_count_per_epoch": trained_sequence_count_per_epoch,
+        "dropped_sequences_per_epoch": (
+            sequence_count - trained_sequence_count_per_epoch
+        ),
+        "micro_batches_per_epoch": micro_batches_per_epoch,
         "optimizer": "AdamW",
-        "learning_rate": training["learning_rate"],
-        "weight_decay": ADAMW_DEFAULT_WEIGHT_DECAY,
-        "betas": list(ADAMW_DEFAULT_BETAS),
-        "epsilon": ADAMW_DEFAULT_EPSILON,
-        "scheduler": "cosine",
-        "warmup_ratio": training["warmup_ratio"],
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "betas": normalized_betas,
+        "epsilon": epsilon,
+        "fused_optimizer_requested": fused_optimizer,
+        "fused_optimizer_actually_used": None,
+        "scheduler": scheduler,
+        "warmup_ratio": warmup_ratio,
         "warmup_steps": warmup_steps,
-        "max_grad_norm": training["max_grad_norm"],
-        "precision": "bf16",
+        "max_grad_norm": max_grad_norm,
+        "precision": precision,
         "sequence_count": sequence_count,
         "steps_per_epoch": steps_per_epoch,
         "total_optimizer_steps": optimizer_steps,
@@ -289,6 +390,55 @@ def _iterate_cpt_batches(
     for epoch in range(1, epochs + 1):
         for step_in_epoch, batch in enumerate(loader, start=1):
             yield epoch, step_in_epoch, batch
+
+
+def _seeded_dataloader_generator(torch_module: Any, seed: int) -> Any:
+    generator = torch_module.Generator()
+    generator.manual_seed(seed)
+    return generator
+
+
+def _build_adamw_optimizer(
+    torch_module: Any, parameters: Any, plan: dict[str, Any]
+) -> tuple[Any, bool, str | None]:
+    parameter_list = list(parameters)
+    optimizer_kwargs = {
+        "lr": plan["learning_rate"],
+        "weight_decay": plan["weight_decay"],
+        "betas": tuple(plan["betas"]),
+        "eps": plan["epsilon"],
+    }
+    if not plan["fused_optimizer_requested"]:
+        return (
+            torch_module.optim.AdamW(parameter_list, **optimizer_kwargs),
+            False,
+            None,
+        )
+    try:
+        optimizer = torch_module.optim.AdamW(
+            parameter_list, fused=True, **optimizer_kwargs
+        )
+    except (TypeError, ValueError, RuntimeError) as exc:
+        optimizer = torch_module.optim.AdamW(parameter_list, **optimizer_kwargs)
+        return optimizer, False, f"{type(exc).__name__}: {exc}"
+    actually_used = bool(getattr(optimizer, "defaults", {}).get("fused", True))
+    return optimizer, actually_used, None
+
+
+def _configure_gradient_checkpointing(model: Any, enabled: bool) -> None:
+    if enabled:
+        if not hasattr(model, "gradient_checkpointing_enable"):
+            raise RuntimeError(
+                "the source model does not support gradient checkpointing"
+            )
+        model.gradient_checkpointing_enable()
+        return
+    if getattr(model, "is_gradient_checkpointing", False):
+        if not hasattr(model, "gradient_checkpointing_disable"):
+            raise RuntimeError(
+                "the source model cannot disable gradient checkpointing"
+            )
+        model.gradient_checkpointing_disable()
 
 
 def _load_model_and_tokenizer(source_checkpoint: Path) -> tuple[Any, Any]:
@@ -370,15 +520,30 @@ def run_cpt_training(
         fact_count=fact_count,
         sequence_count=token_statistics["sequence_count"],
     )
+    model_context_limit = getattr(model.config, "max_position_embeddings", None)
+    if model_context_limit is None:
+        model_context_limit = getattr(model.config, "n_positions", None)
+    if (
+        isinstance(model_context_limit, int)
+        and plan["context_length"] > model_context_limit
+    ):
+        raise ValueError(
+            f"training.context_length={plan['context_length']} exceeds the source "
+            f"model limit of {model_context_limit}"
+        )
 
     try:
         import torch
         from torch.utils.data import DataLoader
-        from transformers import get_cosine_schedule_with_warmup
+        from transformers import get_scheduler
     except ImportError as exc:
         raise RuntimeError("missing required CPT training dependencies") from exc
-    if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
-        raise RuntimeError("CPT training requires a CUDA device with BF16 support")
+    if not torch.cuda.is_available():
+        raise RuntimeError("CPT training requires a CUDA device")
+    if plan["precision"] == "bf16" and not torch.cuda.is_bf16_supported():
+        raise RuntimeError(
+            "training.precision=bf16 requires a CUDA device with BF16 support"
+        )
     device = torch.device("cuda")
     seed = plan["seed"]
     random.seed(seed)
@@ -392,26 +557,35 @@ def run_cpt_training(
     model.train()
     previous_use_cache = model.config.use_cache
     model.config.use_cache = False
+    _configure_gradient_checkpointing(model, plan["gradient_checkpointing"])
     parameter_counts = enable_full_parameter_training(model)
     total_parameters = parameter_counts["total_parameters"]
     trainable_parameters = parameter_counts["trainable_parameters"]
 
+    dataloader_generator = (
+        _seeded_dataloader_generator(torch, seed) if plan["shuffle"] else None
+    )
     loader = DataLoader(
         examples,
         batch_size=plan["batch_size"],
-        shuffle=False,
+        shuffle=plan["shuffle"],
         collate_fn=collate_cpt_examples,
-        pin_memory=True,
+        pin_memory=plan["pin_memory"],
+        drop_last=plan["drop_last"],
+        num_workers=plan["dataloader_workers"],
+        persistent_workers=plan["dataloader_workers"] > 0,
+        generator=dataloader_generator,
     )
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=plan["learning_rate"],
-        weight_decay=plan["weight_decay"],
-        betas=tuple(plan["betas"]),
-        eps=plan["epsilon"],
+    if len(loader) != plan["micro_batches_per_epoch"]:
+        raise RuntimeError("CPT DataLoader batch accounting is inconsistent")
+    optimizer, fused_optimizer_used, fused_fallback_reason = _build_adamw_optimizer(
+        torch, model.parameters(), plan
     )
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer,
+    plan["fused_optimizer_actually_used"] = fused_optimizer_used
+    plan["fused_optimizer_fallback_reason"] = fused_fallback_reason
+    scheduler = get_scheduler(
+        plan["scheduler"],
+        optimizer=optimizer,
         num_warmup_steps=plan["warmup_steps"],
         num_training_steps=plan["total_optimizer_steps"],
     )
@@ -422,8 +596,12 @@ def run_cpt_training(
         "source_checkpoint_config_sha256": hash_file(
             source_checkpoint / "config.json"
         ),
-        "tokenizer_identity": getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__),
-        "model_identity": getattr(model.config, "_name_or_path", model.__class__.__name__),
+        "tokenizer_identity": getattr(
+            tokenizer, "name_or_path", tokenizer.__class__.__name__
+        ),
+        "model_identity": getattr(
+            model.config, "_name_or_path", model.__class__.__name__
+        ),
         "tokenizer_class": tokenizer.__class__.__name__,
         "model_class": model.__class__.__name__,
         "full_parameter_training": True,
@@ -443,50 +621,114 @@ def run_cpt_training(
     weighted_loss = 0.0
     loss_token_count = 0
     observed_supervised_tokens = 0
+    optimizer_step = 0
+    accumulation_micro_batches = 0
+    accumulation_supervised_tokens = 0
+    accumulation_weighted_loss = 0.0
+    accumulation_loss_tokens = 0
+    accumulation_steps = plan["gradient_accumulation_steps"]
+    final_accumulation_remainder = (
+        plan["micro_batches_per_epoch"] % accumulation_steps
+    )
+    autocast_dtype = {
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+    }.get(plan["precision"])
+    scaler = torch.amp.GradScaler("cuda", enabled=plan["precision"] == "fp16")
     optimizer.zero_grad(set_to_none=True)
-    for step, (epoch, step_in_epoch, batch) in enumerate(
-        _iterate_cpt_batches(loader, plan["epochs"]), start=1
+    for epoch, micro_batch_in_epoch, batch in _iterate_cpt_batches(
+        loader, plan["epochs"]
     ):
-        batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
-        observed_supervised_tokens += int((batch["labels"] != -100).sum().item())
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        batch = {
+            key: value.to(device, non_blocking=True)
+            for key, value in batch.items()
+        }
+        supervised_tokens = int((batch["labels"] != -100).sum().item())
+        observed_supervised_tokens += supervised_tokens
+        is_final_micro_batch = (
+            micro_batch_in_epoch == plan["micro_batches_per_epoch"]
+        )
+        in_final_partial_accumulation = (
+            final_accumulation_remainder > 0
+            and micro_batch_in_epoch
+            > plan["micro_batches_per_epoch"] - final_accumulation_remainder
+        )
+        accumulation_divisor = (
+            final_accumulation_remainder
+            if in_final_partial_accumulation
+            else accumulation_steps
+        )
+        autocast_context = (
+            torch.autocast(device_type="cuda", dtype=autocast_dtype)
+            if autocast_dtype is not None
+            else nullcontext()
+        )
+        with autocast_context:
             output = model(**batch)
             loss = output.loss
-        loss.backward()
+            scaled_loss = loss / accumulation_divisor
+        scaler.scale(scaled_loss).backward()
+        contributing_tokens = int((batch["labels"][:, 1:] != -100).sum().item())
+        detached_loss = float(loss.detach().item())
+        weighted_loss += detached_loss * contributing_tokens
+        loss_token_count += contributing_tokens
+        accumulation_micro_batches += 1
+        accumulation_supervised_tokens += supervised_tokens
+        accumulation_weighted_loss += detached_loss * contributing_tokens
+        accumulation_loss_tokens += contributing_tokens
+        should_step = (
+            micro_batch_in_epoch % accumulation_steps == 0
+            or is_final_micro_batch
+        )
+        if not should_step:
+            continue
+
+        scaler.unscale_(optimizer)
         gradient_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(), plan["max_grad_norm"]
         )
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         scheduler.step()
         optimizer.zero_grad(set_to_none=True)
-        contributing_tokens = int((batch["labels"][:, 1:] != -100).sum().item())
-        weighted_loss += float(loss.detach().item()) * contributing_tokens
-        loss_token_count += contributing_tokens
+        optimizer_step += 1
         step_records.append(
             {
                 "record_type": "optimizer_step",
-                "step": step,
+                "step": optimizer_step,
                 "epoch": epoch,
-                "step_in_epoch": step_in_epoch,
-                "loss": float(loss.detach().item()),
+                "step_in_epoch": math.ceil(
+                    micro_batch_in_epoch / accumulation_steps
+                ),
+                "last_micro_batch_in_epoch": micro_batch_in_epoch,
+                "accumulated_micro_batches": accumulation_micro_batches,
+                "loss": accumulation_weighted_loss / accumulation_loss_tokens,
                 "learning_rate": float(scheduler.get_last_lr()[0]),
                 "gradient_norm": float(gradient_norm),
-                "supervised_tokens": int((batch["labels"] != -100).sum().item()),
+                "supervised_tokens": accumulation_supervised_tokens,
             }
         )
+        accumulation_micro_batches = 0
+        accumulation_supervised_tokens = 0
+        accumulation_weighted_loss = 0.0
+        accumulation_loss_tokens = 0
 
     if len(step_records) != plan["optimizer_steps"]:
         raise RuntimeError("CPT optimizer-step accounting is inconsistent")
     expected_supervised_tokens = (
         token_statistics["supervised_tokens"] * plan["epochs"]
     )
-    if observed_supervised_tokens != expected_supervised_tokens:
+    if (
+        not plan["drop_last"]
+        and observed_supervised_tokens != expected_supervised_tokens
+    ):
         raise RuntimeError(
             "CPT training did not consume every supervised token once per epoch"
         )
 
     output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     output_checkpoint.mkdir(parents=True, exist_ok=True)
+    _configure_gradient_checkpointing(model, False)
     model.config.use_cache = previous_use_cache
     model.save_pretrained(output_checkpoint, safe_serialization=True)
     tokenizer.save_pretrained(output_checkpoint)
@@ -499,6 +741,7 @@ def run_cpt_training(
         "optimizer_steps": len(step_records),
         "training_loss": weighted_loss / loss_token_count,
         "loss_contributing_shifted_tokens": loss_token_count,
+        "observed_supervised_tokens": observed_supervised_tokens,
         "runtime_seconds": runtime_seconds,
         "peak_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
     }
