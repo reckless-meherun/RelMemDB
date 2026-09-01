@@ -1,0 +1,20 @@
+{
+  "attribute_facts_per_chain": 29,
+  "configuration_sha256": "27e94b1522dc3fab809de4d56c337c3e05a7cb12207171fbec3f02cb05e13f07",
+  "experiment_name": "exp01_first_feasibility",
+  "experimental_facts_per_chain": 40,
+  "format_version": 2,
+  "identifier_fields_per_chain": 12,
+  "identifiers_counted_as_experimental_facts": false,
+  "latent_positions": 12,
+  "maximum_supported_configured_n": 20000,
+  "relation_facts_per_chain": 11,
+  "schema_topology": "chain",
+  "seed": 2025,
+  "total_attribute_fact_count": 14500,
+  "total_chains": 500,
+  "total_experimental_facts": 20000,
+  "total_identifier_field_count": 6000,
+  "total_relation_fact_count": 5500,
+  "world_json_sha256": "5cc94b7436377b7584852a3c4a8c6f3b44afb83f2b99ac32e9dc16e476c36436"
+}

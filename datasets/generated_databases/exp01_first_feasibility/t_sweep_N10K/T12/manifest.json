@@ -1,0 +1,83 @@
+{
+  "T": 12,
+  "actual_logical_fact_count": 10000,
+  "attribute_fact_count": 7250,
+  "attribute_facts_per_chain": 29,
+  "configuration_sha256": "27e94b1522dc3fab809de4d56c337c3e05a7cb12207171fbec3f02cb05e13f07",
+  "cross_table_fk_edge_count": 11,
+  "cross_table_fk_instance_count": 2750,
+  "database_sha256": "f35529b55eaa042d6257a2c613f12a64a3061885d6a169b8b3dc147ab6324217",
+  "experiment_name": "exp01_first_feasibility",
+  "experimental_facts_per_chain": 40,
+  "format_version": 2,
+  "identifier_field_count": 3000,
+  "identifier_fields_per_chain": 12,
+  "identifiers_counted_as_experimental_facts": false,
+  "intra_table_fk_edge_count": 0,
+  "intra_table_fk_instance_count": 0,
+  "latent_positions": 12,
+  "logical_content_sha256": "f9313c33c0c4af48d797501f6e7c9ba209bfd07524c9427d8245912569f84c97",
+  "master_world_sha256": "5cc94b7436377b7584852a3c4a8c6f3b44afb83f2b99ac32e9dc16e476c36436",
+  "physical_row_count": 3000,
+  "position_partition": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ],
+    [
+      4
+    ],
+    [
+      5
+    ],
+    [
+      6
+    ],
+    [
+      7
+    ],
+    [
+      8
+    ],
+    [
+      9
+    ],
+    [
+      10
+    ],
+    [
+      11
+    ]
+  ],
+  "relation_fact_count": 2750,
+  "relation_facts_per_chain": 11,
+  "requested_N": 10000,
+  "rows_per_table": {
+    "campus": 250,
+    "city": 250,
+    "continent": 250,
+    "country": 250,
+    "course": 250,
+    "course_offering": 250,
+    "department": 250,
+    "enrollment": 250,
+    "region": 250,
+    "school": 250,
+    "student": 250,
+    "subject": 250
+  },
+  "schema_column_count": 52,
+  "schema_foreign_key_count": 11,
+  "selected_chain_count": 250,
+  "stored_value_count": 13000,
+  "sweep": "t_sweep",
+  "table_count": 12
+}
