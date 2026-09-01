@@ -1,4 +1,3 @@
-from math import gcd
 from typing import Any
 
 from config import validate_config
@@ -7,6 +6,18 @@ from utils.hashing import hash_text
 
 FORMAT_VERSION = 2
 IDENTIFIER_MODULUS = 1_000_000
+NATURAL_IDENTIFIER_FIELDS = {
+    "continent": "continent_name",
+    "country": "country_name",
+    "region": "region_name",
+    "city": "city_name",
+    "campus": "campus_name",
+    "school": "school_name",
+    "department": "department_name",
+    "subject": "subject_name",
+    "course": "course_title",
+    "student": "full_name",
+}
 
 # Logical semantic positions are ordered from the root of the chain to its leaf.
 # These descriptors name logical entities and facts, not physical SQLite layouts.
@@ -32,6 +43,15 @@ _STEMS = (
     "Pine", "Quartz", "Redwood", "Silver", "Willow",
 )
 _DIRECTIONS = ("Northern", "Southern", "Eastern", "Western", "Central", "Upper", "Lower")
+_MODIFIERS = (
+    "Ancient", "Blue", "Bright", "Emerald", "Golden", "Grand", "Highland",
+    "Lake", "New", "Quiet", "Royal", "Sapphire", "Sunlit", "Verdant",
+    "White", "Windward",
+)
+_LANDFORMS = (
+    "Arc", "Basin", "Coast", "Highlands", "Isles", "Plateau", "Reach",
+    "Rim", "Shores", "Uplands",
+)
 _DISCIPLINES = (
     "Applied Mathematics", "Computing", "Economics", "Environmental Science",
     "History", "Linguistics", "Materials Science", "Public Policy",
@@ -53,6 +73,17 @@ _LAST_NAMES = (
     "Hassan", "Ito", "Johnson", "Khan", "Lopez", "Mensah", "Novak",
     "Okafor", "Patel", "Rahman", "Silva", "Tran", "Williams",
 )
+_COUNTRY_SUFFIXES = ("a", "ara", "en", "ia", "ora", "ovia", "stan", "une")
+_GOVERNMENTS = ("Commonwealth", "Federation", "Kingdom", "Republic", "Union")
+_CITY_SUFFIXES = ("bridge", "field", "ford", "haven", "port", "stead", "view", "wick")
+_CAMPUS_SITES = (
+    "Arts", "Garden", "Innovation", "Lakeside", "Research", "Riverside",
+    "Technology", "Woodland",
+)
+_COURSE_SUBTITLES = (
+    "Contemporary Issues", "Foundations", "Laboratory", "Methods",
+    "Research Seminar", "Theory and Practice",
+)
 
 
 def _stable_number(seed: int, *parts: object) -> int:
@@ -66,39 +97,96 @@ def _choice(options: tuple[Any, ...], seed: int, *parts: object) -> Any:
     return options[_stable_number(seed, *parts) % len(options)]
 
 
-def _identifier(seed: int, chain_index: int, position: int, prefix: str) -> str:
-    multiplier = (_stable_number(seed, "id-multiplier", position) % IDENTIFIER_MODULUS) | 1
-    while gcd(multiplier, IDENTIFIER_MODULUS) != 1:
-        multiplier = (multiplier + 2) % IDENTIFIER_MODULUS
-    offset = _stable_number(seed, "id-offset", position) % IDENTIFIER_MODULUS
-    number = (multiplier * chain_index + offset) % IDENTIFIER_MODULUS
-    return f"{prefix}{number:06d}"
+def _identifier(
+    seed: int,
+    chain_index: int,
+    position: int,
+    prefix: str,
+    used_identifiers: set[str],
+    used_numeric_suffixes: set[str],
+) -> str:
+    for attempt in range(IDENTIFIER_MODULUS):
+        number = _stable_number(
+            seed, "entity-id", position, chain_index, attempt
+        ) % IDENTIFIER_MODULUS
+        suffix = f"{number:06d}"
+        identifier = f"{prefix}{suffix}"
+        if identifier in used_identifiers or suffix in used_numeric_suffixes:
+            continue
+        used_identifiers.add(identifier)
+        used_numeric_suffixes.add(suffix)
+        return identifier
+    raise RuntimeError("identifier namespace is exhausted")
+
+
+def _natural_name_candidate(
+    field: str, seed: int, chain_index: int, attempt: int
+) -> str:
+    def choose(options: tuple[str, ...], salt: str) -> str:
+        return _choice(options, seed, field, chain_index, attempt, salt)
+
+    stem = choose(_STEMS, "stem")
+    modifier = choose(_MODIFIERS, "modifier")
+    discipline = choose(_DISCIPLINES, "discipline")
+    topic = choose(_TOPICS, "topic")
+    candidates = {
+        "continent_name": (
+            f"{choose(_DIRECTIONS, 'direction')} {modifier} {stem} "
+            f"{choose(_LANDFORMS, 'landform')}"
+        ),
+        "country_name": (
+            f"{modifier} {stem}{choose(_COUNTRY_SUFFIXES, 'suffix')} "
+            f"{choose(_GOVERNMENTS, 'government')}"
+        ),
+        "region_name": (
+            f"{choose(_DIRECTIONS, 'direction')} {modifier} {stem} "
+            f"{choose(_LANDFORMS, 'landform')}"
+        ),
+        "city_name": f"{modifier} {stem}{choose(_CITY_SUFFIXES, 'suffix')}",
+        "campus_name": (
+            f"{stem} {modifier} {choose(_CAMPUS_SITES, 'site')} Campus"
+        ),
+        "school_name": f"{stem} School of {discipline} and {topic}",
+        "department_name": f"{stem} Department of {discipline} and {topic}",
+        "subject_name": f"{modifier} {topic} in {discipline}",
+        "course_title": (
+            f"{modifier} {topic}: {choose(_COURSE_SUBTITLES, 'subtitle')} "
+            f"in {discipline}"
+        ),
+        "full_name": (
+            f"{choose(_FIRST_NAMES, 'first')} "
+            f"{chr(65 + _stable_number(seed, field, chain_index, attempt, 'middle') % 26)}. "
+            f"{choose(_LAST_NAMES, 'last')}"
+        ),
+    }
+    return candidates[field]
+
+
+def _unique_natural_name(
+    field: str, seed: int, chain_index: int, used_names: set[str]
+) -> str:
+    for attempt in range(IDENTIFIER_MODULUS):
+        candidate = _natural_name_candidate(field, seed, chain_index, attempt)
+        if candidate in used_names:
+            continue
+        used_names.add(candidate)
+        return candidate
+    raise RuntimeError(f"natural-name namespace is exhausted for {field}")
 
 
 def _attribute_value(field: str, seed: int, chain_index: int) -> str | int:
-    stem = _choice(_STEMS, seed, field, chain_index, "stem")
-    direction = _choice(_DIRECTIONS, seed, field, chain_index, "direction")
     discipline = _choice(_DISCIPLINES, seed, field, chain_index, "discipline")
     topic = _choice(_TOPICS, seed, field, chain_index, "topic")
     values: dict[str, Any] = {
-        "continent_name": f"{stem} Reach",
         "climate_band": _choice(("polar", "cool temperate", "warm temperate", "subtropical", "tropical"), seed, field, chain_index),
-        "country_name": f"Republic of {stem}{_choice(('ia', 'ara', 'ora', 'en', 'al'), seed, field, chain_index, 'suffix')}",
         "currency_name": f"{_choice(_STEMS, seed, field, chain_index, 'currency')} crown",
-        "region_name": f"{direction} {stem}",
         "administrative_type": _choice(("province", "state", "territory", "prefecture", "district"), seed, field, chain_index),
-        "city_name": f"{stem}{_choice(('ford', 'haven', 'bridge', 'port', 'field', 'view'), seed, field, chain_index, 'suffix')}",
         "population_band": _choice(("under 100,000", "100,000-499,999", "500,000-999,999", "1-3 million", "over 3 million"), seed, field, chain_index),
-        "campus_name": f"{_choice(_STEMS, seed, field, chain_index, 'campus')} {_choice(('Central', 'Riverside', 'North', 'Innovation', 'Garden'), seed, field, chain_index, 'kind')} Campus",
         "campus_type": _choice(("urban", "suburban", "residential", "research park", "distributed"), seed, field, chain_index),
-        "school_name": f"School of {discipline}",
         "founding_period": _choice(("before 1900", "1900-1949", "1950-1974", "1975-1999", "since 2000"), seed, field, chain_index),
-        "department_name": f"Department of {discipline}",
         "focus_area": topic,
-        "subject_name": topic,
         "subject_level": _choice(("introductory", "intermediate", "advanced", "graduate"), seed, field, chain_index),
         "discipline_group": discipline,
-        "course_title": f"{topic}: {_choice(('Foundations', 'Methods', 'Applications', 'Contemporary Issues', 'Research Seminar'), seed, field, chain_index, 'subtitle')}",
         "credit_hours": _choice((2, 3, 4, 5), seed, field, chain_index),
         "delivery_mode": _choice(("in person", "hybrid", "online", "field based"), seed, field, chain_index),
         "section_label": f"Section {_choice(tuple('ABCDEFGH'), seed, field, chain_index)}{1 + _stable_number(seed, field, chain_index, 'section') % 20:02d}",
@@ -107,7 +195,6 @@ def _attribute_value(field: str, seed: int, chain_index: int) -> str | int:
         "academic_term": _choice(("Autumn 2024", "Spring 2025", "Summer 2025", "Autumn 2025", "Spring 2026"), seed, field, chain_index),
         "final_grade": _choice(("A", "A-", "B+", "B", "B-", "C+", "Pass"), seed, field, chain_index),
         "enrollment_status": _choice(("completed", "in progress", "withdrawn", "deferred"), seed, field, chain_index),
-        "full_name": f"{_choice(_FIRST_NAMES, seed, field, chain_index, 'first')} {_choice(_LAST_NAMES, seed, field, chain_index, 'last')}",
         "study_year": _choice(("first year", "second year", "third year", "fourth year", "postgraduate"), seed, field, chain_index),
         "scholarship_status": _choice(("no scholarship", "partial scholarship", "full scholarship", "research fellowship"), seed, field, chain_index),
     }
@@ -135,18 +222,37 @@ def derive_master_world_counts(config: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _build_chain(seed: int, chain_index: int) -> dict[str, Any]:
+def _build_chain(
+    seed: int,
+    chain_index: int,
+    used_identifiers: set[str],
+    used_numeric_suffixes: set[str],
+    used_natural_names: dict[str, set[str]],
+) -> dict[str, Any]:
     entities: list[dict[str, Any]] = []
     for position, spec in enumerate(SEMANTIC_ENTITY_SPECS):
-        attributes = [
-            {"name": name, "value": _attribute_value(name, seed, chain_index)}
-            for name, _ in spec["attributes"]
-        ]
+        natural_identifier_field = NATURAL_IDENTIFIER_FIELDS.get(spec["entity_type"])
+        attributes = []
+        for name, _ in spec["attributes"]:
+            if name == natural_identifier_field:
+                value = _unique_natural_name(
+                    name, seed, chain_index, used_natural_names[name]
+                )
+            else:
+                value = _attribute_value(name, seed, chain_index)
+            attributes.append({"name": name, "value": value})
         entities.append(
             {
                 "position": position,
                 "entity_type": spec["entity_type"],
-                "entity_id": _identifier(seed, chain_index, position, spec["id_prefix"]),
+                "entity_id": _identifier(
+                    seed,
+                    chain_index,
+                    position,
+                    spec["id_prefix"],
+                    used_identifiers,
+                    used_numeric_suffixes,
+                ),
                 "attributes": attributes,
             }
         )
@@ -163,16 +269,60 @@ def _build_chain(seed: int, chain_index: int) -> dict[str, Any]:
     return {"chain_index": chain_index, "entities": entities, "relations": relations}
 
 
+def _validate_world_uniqueness(chains: list[dict[str, Any]]) -> None:
+    identifiers: set[str] = set()
+    numeric_suffixes: set[str] = set()
+    natural_names = {field: set() for field in NATURAL_IDENTIFIER_FIELDS.values()}
+    for chain in chains:
+        for entity in chain["entities"]:
+            identifier = entity["entity_id"]
+            if identifier in identifiers:
+                raise RuntimeError(f"duplicate entity identifier: {identifier}")
+            suffix = identifier[3:]
+            if suffix in numeric_suffixes:
+                raise RuntimeError(f"shared entity-ID numeric suffix: {suffix}")
+            identifiers.add(identifier)
+            numeric_suffixes.add(suffix)
+
+            field = NATURAL_IDENTIFIER_FIELDS.get(entity["entity_type"])
+            if field is None:
+                continue
+            attributes = {
+                attribute["name"]: attribute["value"]
+                for attribute in entity["attributes"]
+            }
+            value = attributes[field]
+            if value in natural_names[field]:
+                raise RuntimeError(f"duplicate {field}: {value}")
+            natural_names[field].add(value)
+
+
 def build_master_world(config: dict[str, Any]) -> dict[str, Any]:
     validate_config(config)
     counts = derive_master_world_counts(config)
     seed = config["experiment"]["seed"]
+    used_identifiers: set[str] = set()
+    used_numeric_suffixes: set[str] = set()
+    used_natural_names = {
+        field: set() for field in NATURAL_IDENTIFIER_FIELDS.values()
+    }
+    chains = [
+        _build_chain(
+            seed,
+            index,
+            used_identifiers,
+            used_numeric_suffixes,
+            used_natural_names,
+        )
+        for index in range(counts["total_chains"])
+    ]
+    _validate_world_uniqueness(chains)
     return {
         "format_version": FORMAT_VERSION,
         "experiment_name": config["experiment"]["name"],
         "seed": seed,
         "construction": {"schema_topology": config["data"]["schema_topology"], **counts},
-        "chains": [_build_chain(seed, index) for index in range(counts["total_chains"])],
+        "chains": chains,
     }
 
 

@@ -10,7 +10,13 @@ import pytest
 from config import ConfigError, load_config, validate_config
 from data.materialize import materialize_database, partition_latent_positions
 from data.serialize import build_database_serialization_block, inspect_database_schema
-from data.world import SEMANTIC_ENTITY_SPECS, build_master_world, derive_master_world_counts
+from data.world import (
+    IDENTIFIER_MODULUS,
+    NATURAL_IDENTIFIER_FIELDS,
+    SEMANTIC_ENTITY_SPECS,
+    build_master_world,
+    derive_master_world_counts,
+)
 from utils.hashing import hash_file, hash_json_object
 
 
@@ -128,6 +134,85 @@ def test_values_are_human_readable_and_identifiers_are_neutral(world: dict[str, 
     assert len(set(suffixes)) == 12
     assert first_chain["entities"][-1]["attributes"][0]["name"] == "full_name"
     assert " " in first_chain["entities"][-1]["attributes"][0]["value"]
+
+
+def test_natural_identifying_fields_are_unique_across_full_world(
+    world: dict[str, Any],
+) -> None:
+    values_by_entity_type = {
+        entity_type: [] for entity_type in NATURAL_IDENTIFIER_FIELDS
+    }
+    for chain in world["chains"]:
+        for entity in chain["entities"]:
+            field = NATURAL_IDENTIFIER_FIELDS.get(entity["entity_type"])
+            if field is None:
+                continue
+            attributes = {
+                attribute["name"]: attribute["value"]
+                for attribute in entity["attributes"]
+            }
+            values_by_entity_type[entity["entity_type"]].append(attributes[field])
+
+    for entity_type, values in values_by_entity_type.items():
+        assert len(values) == len(world["chains"])
+        assert len(values) == len(set(values)), entity_type
+        assert all(isinstance(value, str) and " " in value for value in values)
+
+
+def test_ids_are_globally_unique_deterministic_and_append_stable(
+    config: dict[str, Any], world: dict[str, Any]
+) -> None:
+    identifiers = [
+        entity["entity_id"]
+        for chain in world["chains"]
+        for entity in chain["entities"]
+    ]
+    numeric_suffixes = [identifier[3:] for identifier in identifiers]
+    assert len(identifiers) == len(set(identifiers)) == 6_000
+    assert len(numeric_suffixes) == len(set(numeric_suffixes)) == 6_000
+    assert identifiers == [
+        entity["entity_id"]
+        for chain in build_master_world(config)["chains"]
+        for entity in chain["entities"]
+    ]
+
+    extended_config = deepcopy(config)
+    extended_config["data"]["n_sweep"]["fact_counts"].append(40_000)
+    extended_world = build_master_world(extended_config)
+    assert len(extended_world["chains"]) == 1_000
+    assert extended_world["chains"][: len(world["chains"])] == world["chains"]
+
+
+def test_related_ids_have_no_sequential_or_affine_chain_index_shortcut(
+    world: dict[str, Any],
+) -> None:
+    suffixes_by_position = [
+        [int(chain["entities"][position]["entity_id"][3:]) for chain in world["chains"]]
+        for position in range(len(SEMANTIC_ENTITY_SPECS))
+    ]
+    for suffixes in suffixes_by_position:
+        successive_differences = {
+            (right - left) % IDENTIFIER_MODULUS
+            for left, right in zip(suffixes, suffixes[1:])
+        }
+        assert len(successive_differences) > 450
+
+    for parent_position in range(len(SEMANTIC_ENTITY_SPECS) - 1):
+        related_differences = {
+            (child - parent) % IDENTIFIER_MODULUS
+            for parent, child in zip(
+                suffixes_by_position[parent_position],
+                suffixes_by_position[parent_position + 1],
+                strict=True,
+            )
+        }
+        assert len(related_differences) > 450
+
+    for chain in world["chains"]:
+        related_suffixes = {
+            entity["entity_id"][3:] for entity in chain["entities"]
+        }
+        assert len(related_suffixes) == len(SEMANTIC_ENTITY_SPECS)
 
 
 def test_invalid_fact_accounting_is_rejected(config: dict[str, Any]) -> None:
