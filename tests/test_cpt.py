@@ -249,6 +249,41 @@ def test_physical_t_grouping_is_preserved_without_changing_logical_coverage(
             "student",
         )],
     }
+    expected_headings = {
+        4: [
+            "Continent, Country, and Region Records",
+            "City, Campus, and School Records",
+            "Department, Subject, and Course Records",
+            "Course Offering, Enrollment, and Student Records",
+        ],
+        8: [
+            "Continent and Country Records",
+            "Region and City Records",
+            "Campus and School Records",
+            "Department and Subject Records",
+            "Course Records",
+            "Course Offering Records",
+            "Enrollment Records",
+            "Student Records",
+        ],
+        12: [
+            f"{entity_type.replace('_', ' ').title()} Records"
+            for entity_type in (
+                "continent",
+                "country",
+                "region",
+                "city",
+                "campus",
+                "school",
+                "department",
+                "subject",
+                "course",
+                "course_offering",
+                "enrollment",
+                "student",
+            )
+        ],
+    }
     coverage_hashes = set()
     readable_books = set()
     for table_count in (4, 8, 12):
@@ -261,10 +296,15 @@ def test_physical_t_grouping_is_preserved_without_changing_logical_coverage(
         readable_book = read_text(paths["readable_book"])
         groups = manifest["physical_record_groups"]
         assert manifest["physical_record_group_count"] == table_count
+        assert manifest["record_organization_sentence_count_per_exposure"] == 0
         assert [group["entity_types"] for group in groups] == expected_groups[
             table_count
         ]
-        assert readable_book.count("physical record group.") == table_count
+        assert "physical record group" not in readable_book.lower()
+        assert "This edition presents the database" not in readable_book
+        assert [
+            line for line in readable_book.splitlines() if line.endswith(" Records")
+        ] == expected_headings[table_count]
         coverage_hashes.add(manifest["logical_fact_coverage_sha256"])
         readable_books.add(readable_book)
     assert len(coverage_hashes) == 1

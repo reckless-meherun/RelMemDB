@@ -586,14 +586,6 @@ def _group_heading(entity_types: list[str]) -> str:
     return f"{_human_join(labels)} Records"
 
 
-def _group_description(entity_types: list[str]) -> str:
-    labels = [entity_type.replace("_", " ") for entity_type in entity_types]
-    joined = _human_join(labels)
-    if len(labels) == 1:
-        return f"{joined.capitalize()} information has its own physical record group."
-    return f"{joined.capitalize()} information is kept together in one physical record group."
-
-
 def build_readable_database_book(
     database_path: str | Path,
     database_manifest: dict[str, Any],
@@ -617,15 +609,6 @@ def build_readable_database_book(
         *SCHEMA_ENTITY_DESCRIPTIONS,
         "",
         *SCHEMA_RELATION_DESCRIPTIONS,
-        "",
-        (
-            f"This edition presents the database in {len(physical_groups)} "
-            "physical record groups."
-        ),
-        *[
-            _group_description(group["entity_types"])
-            for group in physical_groups
-        ],
     ]
     covered_facts: list[tuple[str, ...]] = []
     instance_sentence_count = 0
@@ -671,7 +654,7 @@ def build_readable_database_book(
                 len(SCHEMA_ENTITY_DESCRIPTIONS)
                 + len(SCHEMA_RELATION_DESCRIPTIONS)
             ),
-            "record_organization_sentence_count": 1 + len(physical_groups),
+            "record_organization_sentence_count": 0,
             "physical_record_groups": [
                 {
                     "group_index": group["index"],
