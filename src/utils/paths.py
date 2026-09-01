@@ -82,6 +82,21 @@ def cpt_run_dir(table_count: int, fact_count: int) -> Path:
     raise ValueError("non-N10K CPT runs must use the n_sweep_T8 architecture")
 
 
+def target_sft_run_dir(table_count: int, fact_count: int) -> Path:
+    """Return the stage-specific run directory for closed-book target SFT."""
+    table_count = _positive_int(table_count, "table_count")
+    fact_count = _positive_int(fact_count, "fact_count")
+    if fact_count == 10_000:
+        condition_dir = EXP01_RUNS_DIR / "t_sweep_N10K" / f"T{table_count}"
+    elif table_count == 8:
+        condition_dir = EXP01_RUNS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
+    else:
+        raise ValueError(
+            "non-N10K target-SFT runs must use the n_sweep_T8 architecture"
+        )
+    return condition_dir / "target_sft"
+
+
 def t_sweep_qa_dir(table_count: int) -> Path:
     table_count = _positive_int(table_count, "table_count")
     return EXP01_QA_DIR / "t_sweep_N10K" / f"T{table_count}"

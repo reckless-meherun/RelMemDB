@@ -26,6 +26,7 @@ from utils.paths import (
     qa_condition_dir,
     t_sweep_database_dir,
     t_sweep_qa_dir,
+    target_sft_run_dir,
 )
 
 
@@ -119,6 +120,30 @@ def test_default_experiment_config() -> None:
         "pin_memory": True,
         "drop_last": False,
     }
+    assert config["target_sft"] == {
+        "training_split": "validation",
+        "batch_size": 32,
+        "gradient_accumulation_steps": 1,
+        "epochs": 10,
+        "context_length": 128,
+        "optimizer": "adamw",
+        "learning_rate": 2e-5,
+        "weight_decay": 0.01,
+        "betas": [0.9, 0.999],
+        "epsilon": 1e-8,
+        "scheduler": "cosine",
+        "warmup_ratio": 0.05,
+        "max_grad_norm": 1.0,
+        "precision": "bf16",
+        "shuffle": True,
+        "gradient_checkpointing": False,
+        "fused_optimizer": True,
+        "dataloader_workers": 2,
+        "pin_memory": True,
+        "drop_last": False,
+        "answer_only_loss": True,
+        "supervise_eos": True,
+    }
     assert config["evaluation"] == {
         "decoding": "greedy",
         "temperature": 0.0,
@@ -142,6 +167,9 @@ def test_canonical_cpt_paths() -> None:
 def test_canonical_closed_book_qa_path() -> None:
     assert qa_condition_dir(12, 10_000) == (
         EXP01_QA_DIR / "t_sweep_N10K" / "T12"
+    )
+    assert target_sft_run_dir(12, 10_000) == (
+        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "target_sft"
     )
 
 

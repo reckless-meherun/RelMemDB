@@ -57,6 +57,30 @@ training:
   pin_memory: true
   drop_last: false
 
+target_sft:
+  training_split: validation
+  batch_size: 32
+  gradient_accumulation_steps: 1
+  epochs: 10
+  context_length: 128
+  optimizer: adamw
+  learning_rate: 2.0e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  epsilon: 1.0e-8
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  precision: bf16
+  shuffle: true
+  gradient_checkpointing: false
+  fused_optimizer: true
+  dataloader_workers: 2
+  pin_memory: true
+  drop_last: false
+  answer_only_loss: true
+  supervise_eos: true
+
 evaluation:
   decoding: greedy
   temperature: 0.0

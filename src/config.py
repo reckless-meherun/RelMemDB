@@ -14,6 +14,7 @@ REQUIRED_SECTIONS = {
     "model",
     "data",
     "training",
+    "target_sft",
     "evaluation",
     "preflight",
     "layer_study",
@@ -79,6 +80,7 @@ def validate_config(config: dict[str, Any]) -> None:
     model = sections["model"]
     data = sections["data"]
     training = sections["training"]
+    target_sft = sections["target_sft"]
     evaluation = sections["evaluation"]
     preflight = sections["preflight"]
     layer_study = sections["layer_study"]
@@ -318,6 +320,89 @@ def validate_config(config: dict[str, Any]) -> None:
         "drop_last",
     ):
         _require_bool(_required(training, key, "training"), f"training.{key}")
+
+    training_split = _required(target_sft, "training_split", "target_sft")
+    if training_split != "validation":
+        raise ConfigError(
+            "target_sft.training_split must be validation; test is held out"
+        )
+    for key in (
+        "batch_size",
+        "gradient_accumulation_steps",
+        "epochs",
+        "context_length",
+    ):
+        _require_positive_int(
+            _required(target_sft, key, "target_sft"), f"target_sft.{key}"
+        )
+    _require_non_negative_int(
+        _required(target_sft, "dataloader_workers", "target_sft"),
+        "target_sft.dataloader_workers",
+    )
+    target_sft_lr = _require_number(
+        _required(target_sft, "learning_rate", "target_sft"),
+        "target_sft.learning_rate",
+    )
+    if target_sft_lr <= 0:
+        raise ConfigError("target_sft.learning_rate must be positive")
+    target_sft_weight_decay = _require_number(
+        _required(target_sft, "weight_decay", "target_sft"),
+        "target_sft.weight_decay",
+    )
+    if target_sft_weight_decay < 0:
+        raise ConfigError("target_sft.weight_decay must be non-negative")
+    target_sft_epsilon = _require_number(
+        _required(target_sft, "epsilon", "target_sft"), "target_sft.epsilon"
+    )
+    if target_sft_epsilon <= 0:
+        raise ConfigError("target_sft.epsilon must be positive")
+    target_sft_betas = _required(target_sft, "betas", "target_sft")
+    if not isinstance(target_sft_betas, list) or len(target_sft_betas) != 2:
+        raise ConfigError("target_sft.betas must contain exactly two numbers")
+    for index, beta in enumerate(target_sft_betas):
+        beta_value = _require_number(beta, f"target_sft.betas[{index}]")
+        if not 0.0 <= beta_value < 1.0:
+            raise ConfigError(f"target_sft.betas[{index}] must be in [0, 1)")
+    target_sft_warmup = _require_number(
+        _required(target_sft, "warmup_ratio", "target_sft"),
+        "target_sft.warmup_ratio",
+    )
+    if not 0.0 <= target_sft_warmup <= 1.0:
+        raise ConfigError("target_sft.warmup_ratio must be between 0 and 1")
+    target_sft_max_grad_norm = _require_number(
+        _required(target_sft, "max_grad_norm", "target_sft"),
+        "target_sft.max_grad_norm",
+    )
+    if target_sft_max_grad_norm <= 0:
+        raise ConfigError("target_sft.max_grad_norm must be positive")
+    for key, expected in (
+        ("optimizer", "adamw"),
+        ("scheduler", "cosine"),
+        ("precision", "bf16"),
+    ):
+        value = _required(target_sft, key, "target_sft")
+        if not isinstance(value, str) or value.lower() != expected:
+            raise ConfigError(f"target_sft.{key} must be {expected}")
+    for key in (
+        "shuffle",
+        "gradient_checkpointing",
+        "fused_optimizer",
+        "pin_memory",
+        "drop_last",
+        "answer_only_loss",
+        "supervise_eos",
+    ):
+        _require_bool(
+            _required(target_sft, key, "target_sft"), f"target_sft.{key}"
+        )
+    if target_sft["drop_last"]:
+        raise ConfigError(
+            "target_sft.drop_last must be false so every QA record is trained"
+        )
+    if not target_sft["answer_only_loss"]:
+        raise ConfigError("target_sft.answer_only_loss must be true")
+    if not target_sft["supervise_eos"]:
+        raise ConfigError("target_sft.supervise_eos must be true")
 
     for key in ("decoding", "primary_metric"):
         value = _required(evaluation, key, "evaluation")
