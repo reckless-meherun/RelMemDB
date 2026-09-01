@@ -1,0 +1,108 @@
+experiment:
+  name: exp01_first_feasibility
+  seed: 2025
+
+model:
+  name: gpt2_base
+  layers: 12
+  hidden_size: 768
+  attention_heads: 12
+  context_length: 256
+  precision: bf16
+
+data:
+  schema_topology: chain
+  same_master_world: true
+  nested_n_subsets: true
+  reuse_t8_n10k: true
+  hops: [0, 1, 2, 3]
+  t_sweep:
+    fact_count: 10000
+    table_counts: [4, 8, 12]
+  n_sweep:
+    table_count: 8
+    fact_counts: [5000, 10000, 20000]
+  optional_n40k:
+    enabled: false
+    fact_count: 40000
+  master_world:
+    latent_positions: 12
+    descriptive_facts_per_chain: 29
+    relation_facts_per_chain: 11
+    experimental_facts_per_chain: 40
+    identifier_fields_per_chain: 12
+  canonical_target:
+    table_count: 12
+    fact_count: 10000
+
+training:
+  fact_exposure: 4
+  cpt_batch_size: 32
+  cpt_epochs: 20
+  gradient_accumulation_steps: 1
+  optimizer: adamw
+  learning_rate: 3.0e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  epsilon: 1.0e-8
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  context_length: 512
+  precision: bf16
+  shuffle: true
+  gradient_checkpointing: false
+  fused_optimizer: true
+  dataloader_workers: 2
+  pin_memory: true
+  drop_last: false
+
+evaluation:
+  decoding: greedy
+  temperature: 0.0
+  primary_metric: normalized_exact_match
+  batch_size: 32
+  context_length: 256
+  max_new_tokens: 64
+
+preflight:
+  relational_hops: [1, 2, 3]
+  baseline_examples_per_hop: 200
+  baseline_strict_em_threshold: 0.90
+  copy_control_threshold: 0.95
+  max_input_length: 256
+  max_new_tokens: 24
+  generic_relational_skill_training: conditional_if_needed
+  primitive_training:
+    train_examples_per_type: 5000
+    validation_examples_per_type: 1000
+    epochs: 3
+    batch_size: 32
+    optimizer: AdamW
+    learning_rate: 5.0e-5
+    weight_decay: 0.01
+    scheduler: cosine
+    warmup_ratio: 0.05
+    max_grad_norm: 1.0
+    max_length: 256
+    seed: 2025
+  skill_training:
+    train_examples_per_hop: 5000
+    validation_examples_per_hop: 1000
+    epochs: 3
+    batch_size: 32
+    optimizer: AdamW
+    learning_rate: 5.0e-5
+    weight_decay: 0.01
+    scheduler: cosine
+    warmup_ratio: 0.05
+    max_grad_norm: 1.0
+    max_length: 256
+    seed: 2025
+  qa_examples_range:
+    minimum: 10000
+    maximum: 20000
+
+layer_study:
+  enabled: false
+  layers: [6, 9, 12]

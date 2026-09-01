@@ -1,0 +1,431 @@
+{
+  "by_hop": {
+    "H0": {
+      "count": 1286,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "H1": {
+      "count": 426,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "H2": {
+      "count": 341,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "H3": {
+      "count": 300,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "by_target_field": {
+    "administrative_type": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "campus_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "campus_type": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "city_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "climate_band": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "continent_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "country_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "credit_hours": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "currency_name": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "delivery_mode": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "department_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "discipline_group": {
+      "count": 78,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "enrollment_status": {
+      "count": 100,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "final_grade": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "focus_area": {
+      "count": 125,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "founding_period": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "meeting_period": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "natural_anchor": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "population_band": {
+      "count": 200,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "region_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "room_label": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "scholarship_status": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "school_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "study_year": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "subject_level": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "subject_name": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "conditional_relational_accuracy": {
+    "H1": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 426
+    },
+    "H2": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 341
+    },
+    "H3": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": 0.0,
+      "total_count": 300
+    }
+  },
+  "h0_by_fact_type": {
+    "attribute": {
+      "count": 836,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    },
+    "relation": {
+      "count": 450,
+      "normalized_exact_match_accuracy": 0.0,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": 0.0,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "majority_gold_answer_baseline": {
+    "by_target_field": {
+      "administrative_type": {
+        "accuracy": 0.26,
+        "correct_count": 52,
+        "count": 200,
+        "majority_gold_answer": "prefecture"
+      },
+      "campus_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder Sunlit Innovation Campus"
+      },
+      "campus_type": {
+        "accuracy": 0.24,
+        "correct_count": 48,
+        "count": 200,
+        "majority_gold_answer": "research park"
+      },
+      "city_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Cedarwick"
+      },
+      "climate_band": {
+        "accuracy": 0.32,
+        "correct_count": 64,
+        "count": 200,
+        "majority_gold_answer": "polar"
+      },
+      "continent_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Central Ancient Glen Highlands"
+      },
+      "country_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Northwinden Commonwealth"
+      },
+      "credit_hours": {
+        "accuracy": 0.32,
+        "correct_count": 16,
+        "count": 50,
+        "majority_gold_answer": "2"
+      },
+      "currency_name": {
+        "accuracy": 0.12,
+        "correct_count": 24,
+        "count": 200,
+        "majority_gold_answer": "Oak crown"
+      },
+      "delivery_mode": {
+        "accuracy": 0.34,
+        "correct_count": 17,
+        "count": 50,
+        "majority_gold_answer": "in person"
+      },
+      "department_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder Department of Computing and Modern Cultures"
+      },
+      "discipline_group": {
+        "accuracy": 0.16666666666666666,
+        "correct_count": 13,
+        "count": 78,
+        "majority_gold_answer": "Linguistics"
+      },
+      "enrollment_status": {
+        "accuracy": 0.32,
+        "correct_count": 32,
+        "count": 100,
+        "majority_gold_answer": "withdrawn"
+      },
+      "final_grade": {
+        "accuracy": 0.32,
+        "correct_count": 16,
+        "count": 50,
+        "majority_gold_answer": "B"
+      },
+      "focus_area": {
+        "accuracy": 0.144,
+        "correct_count": 18,
+        "count": 125,
+        "majority_gold_answer": "Sustainable Cities"
+      },
+      "founding_period": {
+        "accuracy": 0.26,
+        "correct_count": 52,
+        "count": 200,
+        "majority_gold_answer": "1900-1949"
+      },
+      "meeting_period": {
+        "accuracy": 0.3,
+        "correct_count": 15,
+        "count": 50,
+        "majority_gold_answer": "Monday morning"
+      },
+      "natural_anchor": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Autumn 2024 enrollment for Section A09 of Emerald Markets and Institutions: Research Seminar in Computing"
+      },
+      "population_band": {
+        "accuracy": 0.26,
+        "correct_count": 52,
+        "count": 200,
+        "majority_gold_answer": "1-3 million"
+      },
+      "region_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Central New Falcon Arc"
+      },
+      "room_label": {
+        "accuracy": 0.04,
+        "correct_count": 2,
+        "count": 50,
+        "majority_gold_answer": "Library Annex 491"
+      },
+      "scholarship_status": {
+        "accuracy": 0.28,
+        "correct_count": 14,
+        "count": 50,
+        "majority_gold_answer": "research fellowship"
+      },
+      "school_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Alder School of Environmental Science and Modern Cultures"
+      },
+      "study_year": {
+        "accuracy": 0.24,
+        "correct_count": 12,
+        "count": 50,
+        "majority_gold_answer": "first year"
+      },
+      "subject_level": {
+        "accuracy": 0.3,
+        "correct_count": 15,
+        "count": 50,
+        "majority_gold_answer": "graduate"
+      },
+      "subject_name": {
+        "accuracy": 0.02,
+        "correct_count": 1,
+        "count": 50,
+        "majority_gold_answer": "Ancient Data Systems in Biology"
+      }
+    },
+    "macro_accuracy": 0.16964102564102562
+  },
+  "overall": {
+    "count": 2353,
+    "normalized_exact_match_accuracy": 0.0,
+    "normalized_exact_match_correct": 0,
+    "strict_exact_match_accuracy": 0.0,
+    "strict_exact_match_correct": 0
+  },
+  "primary_metric": "normalized_exact_match",
+  "target_field_macro_average": {
+    "normalized_exact_match_accuracy": 0.0,
+    "strict_exact_match_accuracy": 0.0
+  }
+}
