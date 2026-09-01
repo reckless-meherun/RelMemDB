@@ -1,0 +1,888 @@
+{
+  "N": 10000,
+  "T": 12,
+  "candidate_counts": {
+    "H0": 3510,
+    "H1": 1215,
+    "H2": 945,
+    "H3": 810
+  },
+  "candidate_total": 6480,
+  "chain_count": 135,
+  "chain_indices": [
+    0,
+    1,
+    2,
+    5,
+    6,
+    7,
+    10,
+    11,
+    12,
+    16,
+    17,
+    20,
+    21,
+    22,
+    25,
+    26,
+    27,
+    30,
+    32,
+    35,
+    36,
+    37,
+    40,
+    41,
+    42,
+    45,
+    46,
+    50,
+    51,
+    52,
+    55,
+    56,
+    57,
+    60,
+    61,
+    62,
+    66,
+    67,
+    70,
+    71,
+    72,
+    75,
+    76,
+    77,
+    80,
+    82,
+    85,
+    86,
+    87,
+    90,
+    91,
+    92,
+    95,
+    96,
+    100,
+    101,
+    102,
+    105,
+    106,
+    107,
+    110,
+    111,
+    112,
+    116,
+    117,
+    120,
+    121,
+    122,
+    125,
+    126,
+    127,
+    130,
+    132,
+    135,
+    136,
+    137,
+    140,
+    141,
+    142,
+    145,
+    146,
+    150,
+    151,
+    152,
+    155,
+    156,
+    157,
+    160,
+    161,
+    162,
+    166,
+    167,
+    170,
+    171,
+    172,
+    175,
+    176,
+    177,
+    180,
+    182,
+    185,
+    186,
+    187,
+    190,
+    191,
+    192,
+    195,
+    196,
+    200,
+    201,
+    202,
+    205,
+    206,
+    207,
+    210,
+    211,
+    212,
+    216,
+    217,
+    220,
+    221,
+    222,
+    225,
+    226,
+    227,
+    230,
+    232,
+    235,
+    236,
+    237,
+    240,
+    241,
+    242,
+    245,
+    246
+  ],
+  "chain_indices_sha256": "7ac6af93c595b601153ae0b42a9102184cde2ea30741259a61df04a8657c65cc",
+  "counts": {
+    "H0": {
+      "candidate_count": 3510,
+      "final_retained_count": 3485,
+      "leakage_filtered_count": 25,
+      "post_leakage_count": 3485,
+      "support_closure_filtered_count": 0
+    },
+    "H1": {
+      "candidate_count": 1215,
+      "final_retained_count": 1168,
+      "leakage_filtered_count": 23,
+      "post_leakage_count": 1192,
+      "support_closure_filtered_count": 24
+    },
+    "H2": {
+      "candidate_count": 945,
+      "final_retained_count": 917,
+      "leakage_filtered_count": 17,
+      "post_leakage_count": 928,
+      "support_closure_filtered_count": 11
+    },
+    "H3": {
+      "candidate_count": 810,
+      "final_retained_count": 808,
+      "leakage_filtered_count": 2,
+      "post_leakage_count": 808,
+      "support_closure_filtered_count": 0
+    }
+  },
+  "counts_by_source_entity_type": {
+    "campus": 675,
+    "city": 675,
+    "continent": 135,
+    "country": 405,
+    "course": 761,
+    "course_offering": 270,
+    "department": 662,
+    "enrollment": 270,
+    "region": 540,
+    "school": 673,
+    "student": 540,
+    "subject": 772
+  },
+  "counts_by_target_field": {
+    "administrative_type": 540,
+    "campus_name": 135,
+    "campus_type": 534,
+    "city_name": 135,
+    "climate_band": 540,
+    "continent_name": 135,
+    "country_name": 135,
+    "credit_hours": 135,
+    "currency_name": 540,
+    "delivery_mode": 135,
+    "department_name": 135,
+    "discipline_group": 233,
+    "enrollment_status": 270,
+    "final_grade": 135,
+    "focus_area": 346,
+    "founding_period": 540,
+    "meeting_period": 135,
+    "natural_anchor": 135,
+    "population_band": 540,
+    "region_name": 135,
+    "room_label": 135,
+    "scholarship_status": 135,
+    "school_name": 135,
+    "study_year": 135,
+    "subject_level": 135,
+    "subject_name": 135
+  },
+  "excluded_item_audit": {
+    "counts_by_reason": {
+      "gold_answer_contained_in_normalized_question": 67,
+      "required_h0_support_not_retained": 35
+    },
+    "total_excluded": 102
+  },
+  "excluded_items": [
+    {
+      "hop": "H0",
+      "id": "h0_attr_8067357d41f81481063cb1d1ac7a11aa",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_559df60b64d36ef127fe509c6a3fccf4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_8e270d96f0580d54926849209d702a31",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_e008649f1d1070432475b59b0f8f9f4e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_e385cbe8a5d15381956f20330ff0a389",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_f252e84a336b2d1e3ef90f333b1aa831",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_68b3168c368501df4f04ffa335e72425",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_bb960bd3e58b2fc09eab6af4c957a061",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_fefec8da6d8c05231ff2066134be0441",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_aa4cb705df04dd099e87075e91d42205",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_9f3a2f62259aa9ebfe410eb4937f49ca",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_1162b890b3a86da10b8c085d275f16de",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_20ca2c1bc0aa63ef16a6de0e273bd2dc",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_21e2ac65df16def560dc022af0856f18",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_273fcb69d86b50ce9e309fe64e536dc3",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_9ec2031c4fe58da48a2035767572b9a2",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_6ab07d9dd36fc99cf107b135e8ab0bf7",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_3b0e16cf93f1a7e0f11b6f26222b1f6e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_971b20bb2c8b79c1251b67c029091ee2",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_a3f07f3de3d49fd09f93bf41434e45f0",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_de8059e3bafa68e77df94ae8a00eb247",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_e66d5c4c0591f85542eed16c9a98cc1c",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_dcdea1f5e4f3f2fa48af68e7dd7f8b4a",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_e67ec18892e704dd3589de6edf78739d",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_0453bca0bc2f5b11703db6f5f9ab3bba",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_a5a4c9e84b9ca6a883754c238f681ff3",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_ad8559c8e3994892dc99911093f1e511",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_58bc55f63f6cb9c57f1a640a8cf83955",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_e5684deb334e995eb47ac7e62e4be2e7",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_3be939bcf361a6f12e84c69ffc7caa52",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_6810033c28ada0f4837fd996c6e96aa1",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_79e7a056ce30694a84253eb7f272b3cf",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_1831fb029deafa44b80e92689ca9ba66",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_c01e8b6d8fcf2b02d825873d6803cdb7",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_ec903afc017c0c18eefed0c2631c110b",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_950fe53541ec99a19097e8a9dfa09ffc",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_c7916a1520548f90ceecdfea9216576e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_c2d1959d399a7b41c99f8c4f73129649",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_b189404343dd43b937ea6d63c3e7502d",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_5a48d5946f4ce41aad7c8011a52f1964",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_22f3e6be63d795dfe3224a8e0dd7f71b",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_4a6b65c15b73e3a2edb37e972ff2ac0b",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_3aa30bf86fca37e0ecc2bf3ac3d0b15c",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_e90b27cc6e6fbc91b15313e0af937414",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_54398925f92941057bb527a17d37644e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_af474b5a18b44fae2aa15f4867984781",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_16745d5d12cd9ab71fac17954b1fb406",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_152403b3cefdde3a438ca4898f8ab5f9",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_f5076a2b66075c018bf3fc901258eda4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_03ae50402c3eafcb222efbfc6f287dd4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_d7df90b4be0dd3afa4a435667461268b",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_8e1e76780f197b466bc20ab75db0b26c",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_a4b977c24d8e91607d7699ded22e76a4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_68d81da62a3a18c4f97b69adb1f7abe4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_ad9f04cbdfee9e3094b31d2c8a8a980a",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_1dee4f6df42a5e1721d6ee4bcc775b98",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_482a5826cad7423d0d17992e10b56218",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_f2da694604a2d26f61cd681835d15b93",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_6458377e6518b083d5053666fb1cdc28",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_e996afa854ab9771dc0e0d0cf50a3250",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_5b3a131e53cd2db83c74365860b92db8",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_cabe575950d60a1b97086fa80793cee4",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_1622d2c52f4a73e4d7b239473e4791ea",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_f322d64786d56d6c6f95b107e0be7c23",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_024cbd8c17daf73c5bb8d1ade326694e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H3",
+      "id": "h3_83126b986be234d75f39736089465de7",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H3",
+      "id": "h3_9aa9c4ce6aa7c1e261c645a428b2d771",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_e3b16f75540ce8ff6fe0a3f6b96a12ea",
+      "missing_support_fact_ids": [
+        "h0_attr_8067357d41f81481063cb1d1ac7a11aa"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_756e7fd4a4f8c1c15ab83b8392b8ea82",
+      "missing_support_fact_ids": [
+        "h0_attr_559df60b64d36ef127fe509c6a3fccf4"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_8c2540a8bd1a598f8a160732127f5df6",
+      "missing_support_fact_ids": [
+        "h0_attr_8e270d96f0580d54926849209d702a31"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_369bc0a856444351f984e0d2fbb05af0",
+      "missing_support_fact_ids": [
+        "h0_attr_e385cbe8a5d15381956f20330ff0a389"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_14d14278a09e1b11b553fc21d03229b2",
+      "missing_support_fact_ids": [
+        "h0_attr_f252e84a336b2d1e3ef90f333b1aa831"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_4f76fab91ada70a8ef48072c41212bdb",
+      "missing_support_fact_ids": [
+        "h0_attr_68b3168c368501df4f04ffa335e72425"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_e8c146c35033f0993d285b900291fd87",
+      "missing_support_fact_ids": [
+        "h0_attr_bb960bd3e58b2fc09eab6af4c957a061"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_4dcd44badde01649e13d8b01356f8304",
+      "missing_support_fact_ids": [
+        "h0_attr_fefec8da6d8c05231ff2066134be0441"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_795aa04a0a12c36b3433813ed18062c0",
+      "missing_support_fact_ids": [
+        "h0_attr_aa4cb705df04dd099e87075e91d42205"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_8a484c87ad2944694daa27e53f9f44f5",
+      "missing_support_fact_ids": [
+        "h0_attr_9f3a2f62259aa9ebfe410eb4937f49ca"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_999d2fdf437c51aceff926b5dbef0c26",
+      "missing_support_fact_ids": [
+        "h0_attr_1162b890b3a86da10b8c085d275f16de"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_8271945f34966d0eecc64c8d097d6efc",
+      "missing_support_fact_ids": [
+        "h0_attr_20ca2c1bc0aa63ef16a6de0e273bd2dc"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_f9f9a7bc23a7515df3044f1cdd70ac1b",
+      "missing_support_fact_ids": [
+        "h0_attr_21e2ac65df16def560dc022af0856f18"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_9b8eb2fa1f341df2aecfe7852f1abc50",
+      "missing_support_fact_ids": [
+        "h0_attr_273fcb69d86b50ce9e309fe64e536dc3"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_dfddf4cd2c00c255edb6da4f8792fc10",
+      "missing_support_fact_ids": [
+        "h0_attr_9ec2031c4fe58da48a2035767572b9a2"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_65dd1986634f9fbff853ca69359e0af4",
+      "missing_support_fact_ids": [
+        "h0_attr_6ab07d9dd36fc99cf107b135e8ab0bf7"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_3c06b0870bf950faf463b1ae6062a97b",
+      "missing_support_fact_ids": [
+        "h0_attr_3b0e16cf93f1a7e0f11b6f26222b1f6e"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_18dbc49fc7900acb2d317fb3aef45bbc",
+      "missing_support_fact_ids": [
+        "h0_attr_971b20bb2c8b79c1251b67c029091ee2"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_ce896146542bf878cb2e30c32efb4dc9",
+      "missing_support_fact_ids": [
+        "h0_attr_a3f07f3de3d49fd09f93bf41434e45f0"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_a4a696337ff0c92b03e3837b1b0e9acd",
+      "missing_support_fact_ids": [
+        "h0_attr_de8059e3bafa68e77df94ae8a00eb247"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_0af6eb5a641acdc60847095a73a41908",
+      "missing_support_fact_ids": [
+        "h0_attr_e66d5c4c0591f85542eed16c9a98cc1c"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_6d8c3a07eeb61d37a1373ee8d1febf65",
+      "missing_support_fact_ids": [
+        "h0_attr_dcdea1f5e4f3f2fa48af68e7dd7f8b4a"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_00d33e256820d6dc77bac5ed529b3533",
+      "missing_support_fact_ids": [
+        "h0_attr_e67ec18892e704dd3589de6edf78739d"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_1074a58bf100ad3f346b0176b21a2b77",
+      "missing_support_fact_ids": [
+        "h0_attr_0453bca0bc2f5b11703db6f5f9ab3bba"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_119f7dafb2d8fe90cac29fb3bba1f177",
+      "missing_support_fact_ids": [
+        "h0_attr_8067357d41f81481063cb1d1ac7a11aa"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_fcebfb82a7dab2a50c01afbb5aabaaa8",
+      "missing_support_fact_ids": [
+        "h0_attr_559df60b64d36ef127fe509c6a3fccf4"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_8dd883bbdd71c435e1b9dcdc8e6cf77f",
+      "missing_support_fact_ids": [
+        "h0_attr_e385cbe8a5d15381956f20330ff0a389"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_c9732da64a88ed7047d3bfd1c536c2a8",
+      "missing_support_fact_ids": [
+        "h0_attr_68b3168c368501df4f04ffa335e72425"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_920cd5254cc9570bfe3d4a15fbcfcd2c",
+      "missing_support_fact_ids": [
+        "h0_attr_fefec8da6d8c05231ff2066134be0441"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_3b5fd9e4f94239f203d4c64fd638f775",
+      "missing_support_fact_ids": [
+        "h0_attr_9f3a2f62259aa9ebfe410eb4937f49ca"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_84a7ce14cc5fd3afdf83cbfe40806d05",
+      "missing_support_fact_ids": [
+        "h0_attr_1162b890b3a86da10b8c085d275f16de"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_c05098984f69aa35090dc6ba98a25202",
+      "missing_support_fact_ids": [
+        "h0_attr_273fcb69d86b50ce9e309fe64e536dc3"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_c647322aa6c400dd7988d316146088b6",
+      "missing_support_fact_ids": [
+        "h0_attr_6ab07d9dd36fc99cf107b135e8ab0bf7"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_f378892804a9b8fb5745d7ff9147bd3c",
+      "missing_support_fact_ids": [
+        "h0_attr_de8059e3bafa68e77df94ae8a00eb247"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_a49bb348eb12bedc1c56d02b26864e58",
+      "missing_support_fact_ids": [
+        "h0_attr_dcdea1f5e4f3f2fa48af68e7dd7f8b4a"
+      ],
+      "reason": "required_h0_support_not_retained"
+    }
+  ],
+  "experiment_name": "exp01_first_feasibility",
+  "final_retained_total": 6378,
+  "format_version": 2,
+  "h0_attribute_count": 2270,
+  "h0_fact_type_counts": {
+    "attribute": 2270,
+    "relation": 1215
+  },
+  "h0_relation_count": 1215,
+  "leakage_filtered_counts": {
+    "H0": 25,
+    "H1": 23,
+    "H2": 17,
+    "H3": 2
+  },
+  "output_file_hashes": {
+    "H0.jsonl": "1e2984935192ddd46a34c8cdef943aa4c9dc049dde252c90db6f1904c62181a9",
+    "H1.jsonl": "b84651889378a355de5ee416190f4d059671f292549f29008c27e69828d0b4d5",
+    "H2.jsonl": "00cc3d2eb8f8e4b6747c53bd7b28bbc2e9e63db94c09a0c565e547411ad47af7",
+    "H3.jsonl": "4d1df742d711f977fb9bcbc37ecb4982a8939ee24068c7eaba8a10435525debc"
+  },
+  "question_template_version": "semantic_academic_closed_book_v1",
+  "requested_N": 10000,
+  "retained_counts": {
+    "H0": 3485,
+    "H1": 1168,
+    "H2": 917,
+    "H3": 808
+  },
+  "sft_split_method": "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev within each consecutive block of 10",
+  "sft_split_method_version": "reserved_order_9_train_1_dev_v1",
+  "source_database_manifest_sha256": "d59c01e009a3077311cca2ff63fc59afe50fa623d0f2284ef774be2f80b3e00b",
+  "source_database_sha256": "f35529b55eaa042d6257a2c613f12a64a3061885d6a169b8b3dc147ab6324217",
+  "source_evaluation_split_manifest_sha256": "08b2dbeca48e2d42cae466062699d87ccec9bb45218bf3eea280ccf5423db7df",
+  "split": "train",
+  "support_closure_filtered_counts": {
+    "H0": 0,
+    "H1": 24,
+    "H2": 11,
+    "H3": 0
+  },
+  "zero_context": true
+}

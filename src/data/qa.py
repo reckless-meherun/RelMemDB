@@ -1,19 +1,24 @@
 import re
 import sqlite3
 import unicodedata
+from collections import Counter
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 from data.serialize import read_semantic_database
 from data.world import NATURAL_IDENTIFIER_FIELDS, SEMANTIC_ENTITY_SPECS
 from utils.hashing import hash_file, hash_json_object
-from utils.io import read_json, write_json, write_jsonl
+from utils.io import read_json, read_jsonl, write_json, write_jsonl
 
 QA_FORMAT_VERSION = 2
 QUESTION_TEMPLATE_VERSION = "semantic_academic_closed_book_v1"
 SPLIT_METHOD_VERSION = "chain_order_3_reserved_1_validation_1_test_v1"
+TARGET_SFT_SPLIT_METHOD_VERSION = "reserved_order_9_train_1_dev_v1"
 ID_DIGEST_LENGTH = 32
 HOP_NAMES = ("H0", "H1", "H2", "H3")
+QA_RECORD_SPLITS = ("train", "dev", "validation", "test")
+TARGET_SFT_SPLITS = ("train", "dev")
 
 RAW_ENTITY_IDENTIFIER = re.compile(
     r"\b(?:CTN|CTR|REG|CTY|CAM|SCH|DEP|SUB|CRS|OFF|ENR|STU)\d+\b"
@@ -201,6 +206,28 @@ def assign_chain_splits(chain_count: int) -> dict[str, list[int]]:
     return assignments
 
 
+def assign_reserved_target_sft_splits(
+    reserved_chain_indices: list[int],
+) -> dict[str, list[int]]:
+    """Split the canonical 150 reserved chains by their recorded ordinal order."""
+    if not isinstance(reserved_chain_indices, list) or any(
+        isinstance(index, bool) or not isinstance(index, int) or index < 0
+        for index in reserved_chain_indices
+    ):
+        raise ValueError("reserved_chain_indices must be a list of non-negative integers")
+    if len(reserved_chain_indices) != 150:
+        raise ValueError("target SFT requires exactly 150 reserved source chains")
+    if len(set(reserved_chain_indices)) != len(reserved_chain_indices):
+        raise ValueError("reserved_chain_indices must be unique")
+    assignments = {"train": [], "dev": []}
+    for ordinal, chain_index in enumerate(reserved_chain_indices):
+        split = "dev" if ordinal % 10 == 9 else "train"
+        assignments[split].append(chain_index)
+    if len(assignments["train"]) != 135 or len(assignments["dev"]) != 15:
+        raise RuntimeError("target-SFT 9:1 chain assignment produced invalid counts")
+    return assignments
+
+
 def _verify_database_manifest(
     database_path: Path,
     database_manifest_path: Path,
@@ -338,14 +365,14 @@ def generate_qa_candidates(
     chain_indices: list[int],
     split: str,
 ) -> dict[str, list[dict[str, Any]]]:
-    if split not in {"validation", "test"}:
-        raise ValueError("split must be validation or test")
+    if split not in QA_RECORD_SPLITS:
+        raise ValueError("split must be train, dev, validation, or test")
     records = {hop_name: [] for hop_name in HOP_NAMES}
     all_ids: set[str] = set()
     raw_identifiers = {
         entity["entity_id"]
-        for chain_index in chain_indices
-        for entity in chains[chain_index]["entities"]
+        for chain in chains
+        for entity in chain["entities"]
     }
 
     def add_record(hop_name: str, record: dict[str, Any]) -> None:
@@ -672,4 +699,507 @@ def generate_condition_qa(
         "split_manifest": split_manifest,
         "validation_manifest": split_manifests["validation"],
         "test_manifest": split_manifests["test"],
+    }
+
+
+def _require_nonempty_artifact(path: Path, label: str) -> Path:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"{label} is missing or empty: {path}")
+    return path
+
+
+def _immutable_evaluation_artifact_paths(
+    qa_condition_dir: Path,
+) -> dict[str, Path]:
+    paths = {"split_manifest.json": qa_condition_dir / "split_manifest.json"}
+    for split in ("validation", "test"):
+        for filename in (*[f"{hop}.jsonl" for hop in HOP_NAMES], "manifest.json"):
+            relative = f"{split}/{filename}"
+            paths[relative] = qa_condition_dir / relative
+    return paths
+
+
+def _hash_artifacts(paths: dict[str, Path]) -> dict[str, str]:
+    return {
+        name: hash_file(_require_nonempty_artifact(path, name))
+        for name, path in paths.items()
+    }
+
+
+def _validate_split_record_schema(
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    split: str,
+    raw_identifiers: set[str],
+) -> None:
+    h0_fields = {
+        "id",
+        "split",
+        "hop",
+        "question",
+        "gold_answer",
+        "fact_type",
+        "source_entity_type",
+        "target_entity_type",
+        "target_field",
+    }
+    relational_fields = h0_fields - {"fact_type"} | {"support_fact_ids"}
+    for hop, hop_name in enumerate(HOP_NAMES):
+        expected_fields = h0_fields if hop == 0 else relational_fields
+        for record in records[hop_name]:
+            if set(record) != expected_fields:
+                raise ValueError(f"{split} {hop_name} record schema is invalid")
+            if record["split"] != split or record["hop"] != hop:
+                raise ValueError(f"{split} {hop_name} record metadata is invalid")
+            if not isinstance(record["id"], str) or not record["id"]:
+                raise ValueError(f"{split} {hop_name} record ID is invalid")
+            if not isinstance(record["question"], str) or not record["question"].strip():
+                raise ValueError(f"{split} {hop_name} question is invalid")
+            if not isinstance(record["gold_answer"], str) or not record[
+                "gold_answer"
+            ].strip():
+                raise ValueError(f"{split} {hop_name} answer is invalid")
+            _assert_model_facing_text_is_safe(
+                record["question"], record["gold_answer"], raw_identifiers
+            )
+            if hop == 0 and record["fact_type"] not in {"attribute", "relation"}:
+                raise ValueError(f"{split} H0 fact type is invalid")
+    validate_retained_records(records)
+
+
+def _load_existing_evaluation_split(
+    *,
+    qa_condition_dir: Path,
+    split: str,
+    root_manifest: dict[str, Any],
+    raw_identifiers: set[str],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    split_dir = qa_condition_dir / split
+    manifest_path = _require_nonempty_artifact(
+        split_dir / "manifest.json", f"{split} manifest"
+    )
+    if hash_file(manifest_path) != root_manifest.get(f"{split}_manifest_sha256"):
+        raise ValueError(f"{split} manifest hash does not match split_manifest.json")
+    manifest = read_json(manifest_path)
+    expected_chain_indices = root_manifest[f"{split}_chain_indices"]
+    expected_metadata = {
+        "T": root_manifest["T"],
+        "requested_N": root_manifest["requested_N"],
+        "split": split,
+        "chain_count": len(expected_chain_indices),
+        "chain_indices": expected_chain_indices,
+        "source_database_sha256": root_manifest["source_database_sha256"],
+        "source_database_manifest_sha256": root_manifest[
+            "source_database_manifest_sha256"
+        ],
+        "question_template_version": QUESTION_TEMPLATE_VERSION,
+        "zero_context": True,
+    }
+    for key, expected in expected_metadata.items():
+        if manifest.get(key) != expected:
+            raise ValueError(f"{split} manifest {key} does not match its provenance")
+    if not isinstance(manifest.get("output_file_hashes"), dict) or not isinstance(
+        manifest.get("counts"), dict
+    ):
+        raise ValueError(f"{split} manifest hashes or counts are missing")
+    records: dict[str, list[dict[str, Any]]] = {}
+    for hop_name in HOP_NAMES:
+        path = _require_nonempty_artifact(
+            split_dir / f"{hop_name}.jsonl", f"{split} {hop_name}"
+        )
+        if hash_file(path) != manifest["output_file_hashes"].get(path.name):
+            raise ValueError(f"{split} {hop_name} hash does not match its manifest")
+        records[hop_name] = read_jsonl(path)
+        expected_count = manifest["counts"].get(hop_name, {}).get(
+            "final_retained_count"
+        )
+        if len(records[hop_name]) != expected_count:
+            raise ValueError(f"{split} {hop_name} count does not match its manifest")
+    _validate_split_record_schema(
+        records, split=split, raw_identifiers=raw_identifiers
+    )
+    if sum(len(records[hop]) for hop in HOP_NAMES) != manifest.get(
+        "final_retained_total"
+    ):
+        raise ValueError(f"{split} retained total does not match its manifest")
+    return records, manifest
+
+
+def _validate_evaluation_split_manifest(
+    *,
+    root_manifest: dict[str, Any],
+    root_manifest_sha256: str,
+    database_path: Path,
+    database_manifest_path: Path,
+    database_manifest: dict[str, Any],
+    chain_count: int,
+) -> None:
+    expected = {
+        "format_version": QA_FORMAT_VERSION,
+        "experiment_name": database_manifest["experiment_name"],
+        "T": database_manifest["T"],
+        "requested_N": database_manifest["requested_N"],
+        "total_chain_count": chain_count,
+        "reserved_chain_count": 150,
+        "validation_chain_count": 50,
+        "test_chain_count": 50,
+        "source_database_sha256": hash_file(database_path),
+        "source_database_manifest_sha256": hash_file(database_manifest_path),
+        "split_method_version": SPLIT_METHOD_VERSION,
+        "question_template_version": QUESTION_TEMPLATE_VERSION,
+        "target_qa_training_generated": False,
+        "zero_context": True,
+    }
+    for key, expected_value in expected.items():
+        if root_manifest.get(key) != expected_value:
+            raise ValueError(
+                f"source evaluation split manifest {key} does not match provenance"
+            )
+    assignments = {
+        name: root_manifest.get(f"{name}_chain_indices")
+        for name in ("reserved", "validation", "test")
+    }
+    if assignments != assign_chain_splits(chain_count):
+        raise ValueError("source evaluation chain assignments are invalid")
+    if root_manifest.get("chain_assignments_sha256") != hash_json_object(assignments):
+        raise ValueError("source evaluation chain assignment hash is invalid")
+    if len(root_manifest_sha256) != 64:
+        raise ValueError("source evaluation split manifest hash is invalid")
+
+
+def _flatten_records(
+    records: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    return [record for hop_name in HOP_NAMES for record in records[hop_name]]
+
+
+def _pairwise_overlap_counts(
+    values_by_partition: dict[str, set[Any]],
+) -> dict[str, int]:
+    return {
+        f"{left}__{right}": len(values_by_partition[left] & values_by_partition[right])
+        for left, right in combinations(values_by_partition, 2)
+    }
+
+
+def _overlap_audits(
+    *,
+    chain_indices: dict[str, list[int]],
+    records: dict[str, dict[str, list[dict[str, Any]]]],
+) -> dict[str, dict[str, int]]:
+    flat = {partition: _flatten_records(value) for partition, value in records.items()}
+    chain_overlaps = _pairwise_overlap_counts(
+        {partition: set(indices) for partition, indices in chain_indices.items()}
+    )
+    qa_id_overlaps = _pairwise_overlap_counts(
+        {
+            partition: {record["id"] for record in partition_records}
+            for partition, partition_records in flat.items()
+        }
+    )
+    exact_question_overlaps = _pairwise_overlap_counts(
+        {
+            partition: {record["question"] for record in partition_records}
+            for partition, partition_records in flat.items()
+        }
+    )
+    normalized_question_overlaps = _pairwise_overlap_counts(
+        {
+            partition: {
+                normalize_for_leakage(record["question"])
+                for record in partition_records
+            }
+            for partition, partition_records in flat.items()
+        }
+    )
+    normalized_qa_pair_overlaps = _pairwise_overlap_counts(
+        {
+            partition: {
+                (
+                    normalize_for_leakage(record["question"]),
+                    normalize_for_leakage(record["gold_answer"]),
+                )
+                for record in partition_records
+            }
+            for partition, partition_records in flat.items()
+        }
+    )
+    audits = {
+        "chain_overlap_counts": chain_overlaps,
+        "qa_id_overlap_counts": qa_id_overlaps,
+        "question_overlap_counts": exact_question_overlaps,
+        "exact_question_overlap_counts": exact_question_overlaps,
+        "normalized_question_overlap_counts": normalized_question_overlaps,
+        "normalized_qa_pair_overlap_counts": normalized_qa_pair_overlaps,
+    }
+    for audit_name, counts in audits.items():
+        nonzero = {pair: count for pair, count in counts.items() if count}
+        if nonzero:
+            raise ValueError(f"cross-partition {audit_name} is nonzero: {nonzero}")
+    return audits
+
+
+def _target_split_manifest(
+    *,
+    split: str,
+    records: dict[str, list[dict[str, Any]]],
+    audit: dict[str, Any],
+    chain_indices: list[int],
+    base_manifest: dict[str, Any],
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    flattened = _flatten_records(records)
+    h0_fact_type_counts = Counter(record["fact_type"] for record in records["H0"])
+    source_counts = Counter(record["source_entity_type"] for record in flattened)
+    target_field_counts = Counter(record["target_field"] for record in flattened)
+    exclusion_reasons = Counter(
+        item["reason"] for item in audit["excluded_items"]
+    )
+    candidate_counts = {
+        hop: audit["counts"][hop]["candidate_count"] for hop in HOP_NAMES
+    }
+    leakage_counts = {
+        hop: audit["counts"][hop]["leakage_filtered_count"] for hop in HOP_NAMES
+    }
+    closure_counts = {
+        hop: audit["counts"][hop]["support_closure_filtered_count"]
+        for hop in HOP_NAMES
+    }
+    retained_counts = {hop: len(records[hop]) for hop in HOP_NAMES}
+    return {
+        "format_version": QA_FORMAT_VERSION,
+        "experiment_name": base_manifest["experiment_name"],
+        "T": base_manifest["T"],
+        "N": base_manifest["requested_N"],
+        "requested_N": base_manifest["requested_N"],
+        "split": split,
+        "chain_count": len(chain_indices),
+        "chain_indices": chain_indices,
+        "chain_indices_sha256": hash_json_object(chain_indices),
+        "source_database_sha256": base_manifest["source_database_sha256"],
+        "source_database_manifest_sha256": base_manifest[
+            "source_database_manifest_sha256"
+        ],
+        "source_evaluation_split_manifest_sha256": base_manifest[
+            "source_evaluation_split_manifest_sha256"
+        ],
+        "sft_split_method": base_manifest["sft_split_method"],
+        "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+        "question_template_version": QUESTION_TEMPLATE_VERSION,
+        "zero_context": True,
+        "candidate_counts": candidate_counts,
+        "leakage_filtered_counts": leakage_counts,
+        "support_closure_filtered_counts": closure_counts,
+        "retained_counts": retained_counts,
+        "counts": audit["counts"],
+        "candidate_total": sum(candidate_counts.values()),
+        "h0_attribute_count": h0_fact_type_counts.get("attribute", 0),
+        "h0_relation_count": h0_fact_type_counts.get("relation", 0),
+        "h0_fact_type_counts": {
+            "attribute": h0_fact_type_counts.get("attribute", 0),
+            "relation": h0_fact_type_counts.get("relation", 0),
+        },
+        "counts_by_source_entity_type": dict(sorted(source_counts.items())),
+        "counts_by_target_field": dict(sorted(target_field_counts.items())),
+        "final_retained_total": len(flattened),
+        "excluded_item_audit": {
+            "total_excluded": len(audit["excluded_items"]),
+            "counts_by_reason": dict(sorted(exclusion_reasons.items())),
+        },
+        "excluded_items": audit["excluded_items"],
+        "output_file_hashes": {
+            path.name: hash_file(path) for path in paths.values()
+        },
+    }
+
+
+def _write_target_sft_split(
+    *,
+    output_dir: Path,
+    split: str,
+    records: dict[str, list[dict[str, Any]]],
+    audit: dict[str, Any],
+    chain_indices: list[int],
+    base_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    split_dir = output_dir / split
+    paths = {hop: split_dir / f"{hop}.jsonl" for hop in HOP_NAMES}
+    for hop, path in paths.items():
+        write_jsonl(path, records[hop])
+    manifest = _target_split_manifest(
+        split=split,
+        records=records,
+        audit=audit,
+        chain_indices=chain_indices,
+        base_manifest=base_manifest,
+        paths=paths,
+    )
+    write_json(split_dir / "manifest.json", manifest)
+    return manifest
+
+
+def generate_target_sft_qa(
+    config: dict[str, Any],
+    database_path: str | Path,
+    database_manifest_path: str | Path,
+    qa_condition_dir: str | Path,
+    *,
+    expected_table_count: int,
+    expected_logical_fact_count: int | None = None,
+) -> dict[str, Any]:
+    """Generate target-SFT train/dev QA only from recorded reserved chains."""
+    database_path = Path(database_path)
+    database_manifest_path = Path(database_manifest_path)
+    qa_condition_dir = Path(qa_condition_dir)
+    output_dir = qa_condition_dir / "target_sft"
+    if output_dir.exists():
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            raise FileExistsError(
+                f"refusing to overwrite non-empty target-SFT directory: {output_dir}"
+            )
+
+    immutable_paths = _immutable_evaluation_artifact_paths(qa_condition_dir)
+    immutable_hashes_before = _hash_artifacts(immutable_paths)
+    evaluation_manifest_path = immutable_paths["split_manifest.json"]
+    evaluation_manifest = read_json(evaluation_manifest_path)
+    evaluation_manifest_sha256 = immutable_hashes_before["split_manifest.json"]
+    chains, database_manifest = load_verified_semantic_chains(
+        database_path,
+        database_manifest_path,
+        expected_table_count=expected_table_count,
+        expected_logical_fact_count=expected_logical_fact_count,
+    )
+    _validate_evaluation_split_manifest(
+        root_manifest=evaluation_manifest,
+        root_manifest_sha256=evaluation_manifest_sha256,
+        database_path=database_path,
+        database_manifest_path=database_manifest_path,
+        database_manifest=database_manifest,
+        chain_count=len(chains),
+    )
+    reserved_assignments = assign_reserved_target_sft_splits(
+        evaluation_manifest["reserved_chain_indices"]
+    )
+    if set(reserved_assignments["train"]) & set(reserved_assignments["dev"]):
+        raise RuntimeError("target-SFT train and dev chains overlap")
+    if set(reserved_assignments["train"]) | set(reserved_assignments["dev"]) != set(
+        evaluation_manifest["reserved_chain_indices"]
+    ):
+        raise RuntimeError("target-SFT assignments do not cover the reserved chains")
+
+    raw_identifiers = {
+        entity["entity_id"] for chain in chains for entity in chain["entities"]
+    }
+    all_records: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    split_audits: dict[str, dict[str, Any]] = {}
+    for split in TARGET_SFT_SPLITS:
+        candidates = generate_qa_candidates(
+            chains, reserved_assignments[split], split
+        )
+        records, audit = filter_qa_candidates(candidates)
+        _validate_split_record_schema(
+            records, split=split, raw_identifiers=raw_identifiers
+        )
+        all_records[split] = records
+        split_audits[split] = audit
+
+    evaluation_records: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for split in ("validation", "test"):
+        evaluation_records[split], _ = _load_existing_evaluation_split(
+            qa_condition_dir=qa_condition_dir,
+            split=split,
+            root_manifest=evaluation_manifest,
+            raw_identifiers=raw_identifiers,
+        )
+    partition_records = {**all_records, **evaluation_records}
+    partition_chain_indices = {
+        "train": reserved_assignments["train"],
+        "dev": reserved_assignments["dev"],
+        "validation": evaluation_manifest["validation_chain_indices"],
+        "test": evaluation_manifest["test_chain_indices"],
+    }
+    overlap_audits = _overlap_audits(
+        chain_indices=partition_chain_indices,
+        records=partition_records,
+    )
+
+    base_manifest = {
+        "experiment_name": config["experiment"]["name"],
+        "T": database_manifest["T"],
+        "requested_N": database_manifest["requested_N"],
+        "source_database_sha256": hash_file(database_path),
+        "source_database_manifest_sha256": hash_file(database_manifest_path),
+        "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
+        "sft_split_method": (
+            "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev "
+            "within each consecutive block of 10"
+        ),
+    }
+    split_manifests = {
+        split: _write_target_sft_split(
+            output_dir=output_dir,
+            split=split,
+            records=all_records[split],
+            audit=split_audits[split],
+            chain_indices=reserved_assignments[split],
+            base_manifest=base_manifest,
+        )
+        for split in TARGET_SFT_SPLITS
+    }
+
+    immutable_hashes_after = _hash_artifacts(immutable_paths)
+    if immutable_hashes_after != immutable_hashes_before:
+        raise RuntimeError("immutable validation/test QA artifacts changed during generation")
+    assignment_hashes = {
+        split: hash_json_object(reserved_assignments[split])
+        for split in TARGET_SFT_SPLITS
+    }
+    split_manifest = {
+        "format_version": QA_FORMAT_VERSION,
+        "experiment_name": base_manifest["experiment_name"],
+        "T": base_manifest["T"],
+        "N": base_manifest["requested_N"],
+        "requested_N": base_manifest["requested_N"],
+        "source_database_sha256": base_manifest["source_database_sha256"],
+        "source_database_manifest_sha256": base_manifest[
+            "source_database_manifest_sha256"
+        ],
+        "source_evaluation_split_manifest": "../split_manifest.json",
+        "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
+        "question_template_version": QUESTION_TEMPLATE_VERSION,
+        "sft_split_method": base_manifest["sft_split_method"],
+        "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+        "original_reserved_chain_count": len(
+            evaluation_manifest["reserved_chain_indices"]
+        ),
+        "train_chain_count": len(reserved_assignments["train"]),
+        "dev_chain_count": len(reserved_assignments["dev"]),
+        "train_chain_indices": reserved_assignments["train"],
+        "dev_chain_indices": reserved_assignments["dev"],
+        "train_chain_indices_sha256": assignment_hashes["train"],
+        "dev_chain_indices_sha256": assignment_hashes["dev"],
+        "chain_assignment_hashes": assignment_hashes,
+        "target_sft_chain_assignments_sha256": hash_json_object(
+            reserved_assignments
+        ),
+        "validation_chain_indices": evaluation_manifest[
+            "validation_chain_indices"
+        ],
+        "test_chain_indices": evaluation_manifest["test_chain_indices"],
+        **overlap_audits,
+        "zero_context": True,
+        "target_qa_training_generated": True,
+        "deterministic_generation": True,
+        "runtime_llm_used": False,
+        "immutable_evaluation_artifact_hashes_before": immutable_hashes_before,
+        "immutable_evaluation_artifact_hashes_after": immutable_hashes_after,
+        "immutable_evaluation_artifacts_unchanged": True,
+        "train_manifest_sha256": hash_file(output_dir / "train" / "manifest.json"),
+        "dev_manifest_sha256": hash_file(output_dir / "dev" / "manifest.json"),
+    }
+    write_json(output_dir / "split_manifest.json", split_manifest)
+    return {
+        "split_manifest": split_manifest,
+        "train_manifest": split_manifests["train"],
+        "dev_manifest": split_manifests["dev"],
     }

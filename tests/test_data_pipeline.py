@@ -11,10 +11,13 @@ from data.qa import (
     RAW_ENTITY_IDENTIFIER,
     answer_is_in_question,
     assign_chain_splits,
+    assign_reserved_target_sft_splits,
     filter_qa_candidates,
     generate_condition_qa,
     generate_qa_candidates,
+    generate_target_sft_qa,
     load_verified_semantic_chains,
+    normalize_for_leakage,
 )
 from data.world import (
     NATURAL_IDENTIFIER_FIELDS,
@@ -109,6 +112,44 @@ def _records_for_split(output_dir: Path, split: str) -> dict[str, list[dict[str,
     }
 
 
+def _evaluation_artifact_hashes(output_dir: Path) -> dict[str, str]:
+    relative_paths = [
+        Path("split_manifest.json"),
+        *(
+            Path(split) / filename
+            for split in ("validation", "test")
+            for filename in (*[f"{hop}.jsonl" for hop in HOP_NAMES], "manifest.json")
+        ),
+    ]
+    return {
+        relative.as_posix(): hash_file(output_dir / relative)
+        for relative in relative_paths
+    }
+
+
+@pytest.fixture(scope="module")
+def target_sft_condition(
+    qa_condition: dict[str, Any], default_config: dict[str, Any]
+) -> dict[str, Any]:
+    hashes_before = _evaluation_artifact_hashes(qa_condition["output_dir"])
+    result = generate_target_sft_qa(
+        default_config,
+        qa_condition["database_path"],
+        qa_condition["database_manifest_path"],
+        qa_condition["output_dir"],
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
+    )
+    hashes_after = _evaluation_artifact_hashes(qa_condition["output_dir"])
+    return {
+        **qa_condition,
+        "output_dir": qa_condition["output_dir"] / "target_sft",
+        "hashes_before": hashes_before,
+        "hashes_after": hashes_after,
+        "result": result,
+    }
+
+
 def test_semantic_academic_schema_is_reconstructed_from_temporary_sqlite(
     qa_condition: dict[str, Any],
 ) -> None:
@@ -142,6 +183,23 @@ def test_deterministic_150_50_50_chain_split_is_disjoint_and_nested_friendly() -
         split: [index for index in indices if index < 125]
         for split, indices in assignments.items()
     }
+
+
+def test_reserved_target_sft_split_uses_recorded_order_and_exact_135_15_rule() -> None:
+    reserved = assign_chain_splits(250)["reserved"]
+    assignments = assign_reserved_target_sft_splits(reserved)
+    assert assignments["dev"] == reserved[9::10]
+    assert assignments["train"] == [
+        chain_index
+        for ordinal, chain_index in enumerate(reserved)
+        if ordinal % 10 != 9
+    ]
+    assert len(assignments["train"]) == 135
+    assert len(assignments["dev"]) == 15
+    assert not set(assignments["train"]) & set(assignments["dev"])
+    assert set(assignments["train"]) | set(assignments["dev"]) == set(reserved)
+    with pytest.raises(ValueError, match="exactly 150"):
+        assign_reserved_target_sft_splits(reserved[:-1])
 
 
 @pytest.mark.parametrize("split", ["validation", "test"])
@@ -420,6 +478,226 @@ def test_database_manifest_tampering_fails_before_output(
             expected_logical_fact_count=10_000,
         )
     assert not output_dir.exists()
+
+
+def test_target_sft_generation_has_exact_source_and_candidate_counts(
+    target_sft_condition: dict[str, Any],
+) -> None:
+    root = target_sft_condition["result"]["split_manifest"]
+    train = target_sft_condition["result"]["train_manifest"]
+    dev = target_sft_condition["result"]["dev_manifest"]
+    evaluation = read_json(target_sft_condition["output_dir"].parent / "split_manifest.json")
+    assert root["original_reserved_chain_count"] == 150
+    assert root["train_chain_count"] == train["chain_count"] == 135
+    assert root["dev_chain_count"] == dev["chain_count"] == 15
+    assert set(root["train_chain_indices"]) | set(root["dev_chain_indices"]) == set(
+        evaluation["reserved_chain_indices"]
+    )
+    assert not set(root["train_chain_indices"]) & set(root["dev_chain_indices"])
+    assert root["dev_chain_indices"] == evaluation["reserved_chain_indices"][9::10]
+    assert train["candidate_counts"] == {
+        "H0": 3510,
+        "H1": 1215,
+        "H2": 945,
+        "H3": 810,
+    }
+    assert train["candidate_total"] == 6480
+    assert dev["candidate_counts"] == {
+        "H0": 390,
+        "H1": 135,
+        "H2": 105,
+        "H3": 90,
+    }
+    assert dev["candidate_total"] == 720
+
+
+@pytest.mark.parametrize("split", ["train", "dev"])
+def test_target_sft_schema_metadata_safety_and_support_closure(
+    target_sft_condition: dict[str, Any], split: str
+) -> None:
+    records = _records_for_split(target_sft_condition["output_dir"], split)
+    manifest = target_sft_condition["result"][f"{split}_manifest"]
+    h0_fields = {
+        "id",
+        "split",
+        "hop",
+        "question",
+        "gold_answer",
+        "fact_type",
+        "source_entity_type",
+        "target_entity_type",
+        "target_field",
+    }
+    relational_fields = h0_fields - {"fact_type"} | {"support_fact_ids"}
+    assert all(set(record) == h0_fields for record in records["H0"])
+    assert {record["fact_type"] for record in records["H0"]} == {
+        "attribute",
+        "relation",
+    }
+    assert manifest["h0_attribute_count"] == sum(
+        record["fact_type"] == "attribute" for record in records["H0"]
+    )
+    assert manifest["h0_relation_count"] == sum(
+        record["fact_type"] == "relation" for record in records["H0"]
+    )
+    h0_ids = {record["id"] for record in records["H0"]}
+    raw_ids = {
+        entity["entity_id"]
+        for chain in target_sft_condition["chains"]
+        for entity in chain["entities"]
+    }
+    for hop, hop_name in enumerate(HOP_NAMES):
+        for record in records[hop_name]:
+            assert record["split"] == split
+            assert record["hop"] == hop
+            assert "context" not in record
+            assert "sql" not in record
+            assert not answer_is_in_question(record["question"], record["gold_answer"])
+            assert RAW_ENTITY_IDENTIFIER.search(record["question"]) is None
+            assert RAW_ENTITY_IDENTIFIER.search(record["gold_answer"]) is None
+            assert not any(raw_id in record["question"] for raw_id in raw_ids)
+            assert not any(raw_id in record["gold_answer"] for raw_id in raw_ids)
+            if hop:
+                assert set(record) == relational_fields
+                assert len(record["support_fact_ids"]) == hop + 1
+                assert set(record["support_fact_ids"]) <= h0_ids
+    assert manifest["final_retained_total"] == sum(
+        len(records[hop]) for hop in HOP_NAMES
+    )
+    assert manifest["retained_counts"] == {
+        hop: len(records[hop]) for hop in HOP_NAMES
+    }
+
+
+def test_target_sft_has_zero_cross_partition_overlap(
+    target_sft_condition: dict[str, Any],
+) -> None:
+    root = target_sft_condition["result"]["split_manifest"]
+    for audit_name in (
+        "chain_overlap_counts",
+        "qa_id_overlap_counts",
+        "question_overlap_counts",
+        "exact_question_overlap_counts",
+        "normalized_question_overlap_counts",
+        "normalized_qa_pair_overlap_counts",
+    ):
+        assert root[audit_name]
+        assert set(root[audit_name].values()) == {0}
+
+    partition_records = {
+        split: [
+            record
+            for hop in HOP_NAMES
+            for record in _records_for_split(
+                target_sft_condition["output_dir"]
+                if split in {"train", "dev"}
+                else target_sft_condition["output_dir"].parent,
+                split,
+            )[hop]
+        ]
+        for split in ("train", "dev", "validation", "test")
+    }
+    for left_index, left in enumerate(partition_records):
+        for right in list(partition_records)[left_index + 1 :]:
+            left_records = partition_records[left]
+            right_records = partition_records[right]
+            assert not {record["id"] for record in left_records} & {
+                record["id"] for record in right_records
+            }
+            assert not {
+                normalize_for_leakage(record["question"])
+                for record in left_records
+            } & {
+                normalize_for_leakage(record["question"])
+                for record in right_records
+            }
+            assert not {
+                (
+                    normalize_for_leakage(record["question"]),
+                    normalize_for_leakage(record["gold_answer"]),
+                )
+                for record in left_records
+            } & {
+                (
+                    normalize_for_leakage(record["question"]),
+                    normalize_for_leakage(record["gold_answer"]),
+                )
+                for record in right_records
+            }
+
+
+def test_target_sft_preserves_immutable_evaluation_artifacts(
+    target_sft_condition: dict[str, Any],
+) -> None:
+    root = target_sft_condition["result"]["split_manifest"]
+    assert target_sft_condition["hashes_before"] == target_sft_condition[
+        "hashes_after"
+    ]
+    assert root["immutable_evaluation_artifact_hashes_before"] == root[
+        "immutable_evaluation_artifact_hashes_after"
+    ]
+    assert root["immutable_evaluation_artifacts_unchanged"] is True
+
+
+def test_target_sft_generation_is_byte_deterministic(
+    target_sft_condition: dict[str, Any], default_config: dict[str, Any]
+) -> None:
+    second_condition_dir = target_sft_condition["root"] / "qa_target_second"
+    generate_condition_qa(
+        default_config,
+        target_sft_condition["database_path"],
+        target_sft_condition["database_manifest_path"],
+        second_condition_dir,
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
+    )
+    second_result = generate_target_sft_qa(
+        default_config,
+        target_sft_condition["database_path"],
+        target_sft_condition["database_manifest_path"],
+        second_condition_dir,
+        expected_table_count=12,
+        expected_logical_fact_count=10_000,
+    )
+    assert second_result == target_sft_condition["result"]
+    relative_files = [
+        Path("split_manifest.json"),
+        *(
+            Path(split) / filename
+            for split in ("train", "dev")
+            for filename in (*[f"{hop}.jsonl" for hop in HOP_NAMES], "manifest.json")
+        ),
+    ]
+    assert all(
+        (target_sft_condition["output_dir"] / relative).read_bytes()
+        == (second_condition_dir / "target_sft" / relative).read_bytes()
+        for relative in relative_files
+    )
+
+
+def test_target_sft_refuses_to_overwrite_nonempty_directory(
+    target_sft_condition: dict[str, Any], default_config: dict[str, Any]
+) -> None:
+    hashes_before = {
+        path.relative_to(target_sft_condition["output_dir"]).as_posix(): hash_file(path)
+        for path in target_sft_condition["output_dir"].rglob("*")
+        if path.is_file()
+    }
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        generate_target_sft_qa(
+            default_config,
+            target_sft_condition["database_path"],
+            target_sft_condition["database_manifest_path"],
+            target_sft_condition["output_dir"].parent,
+            expected_table_count=12,
+            expected_logical_fact_count=10_000,
+        )
+    hashes_after = {
+        path.relative_to(target_sft_condition["output_dir"]).as_posix(): hash_file(path)
+        for path in target_sft_condition["output_dir"].rglob("*")
+        if path.is_file()
+    }
+    assert hashes_after == hashes_before
 
 
 def test_obsolete_opaque_qa_assumptions_are_removed() -> None:

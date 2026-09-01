@@ -1,0 +1,214 @@
+{
+  "N": 10000,
+  "T": 12,
+  "candidate_counts": {
+    "H0": 390,
+    "H1": 135,
+    "H2": 105,
+    "H3": 90
+  },
+  "candidate_total": 720,
+  "chain_count": 15,
+  "chain_indices": [
+    15,
+    31,
+    47,
+    65,
+    81,
+    97,
+    115,
+    131,
+    147,
+    165,
+    181,
+    197,
+    215,
+    231,
+    247
+  ],
+  "chain_indices_sha256": "c9c1351fd997bcbb122d4b2f2adb34736481cbb4a9d0faaada609e1854c5a182",
+  "counts": {
+    "H0": {
+      "candidate_count": 390,
+      "final_retained_count": 388,
+      "leakage_filtered_count": 2,
+      "post_leakage_count": 388,
+      "support_closure_filtered_count": 0
+    },
+    "H1": {
+      "candidate_count": 135,
+      "final_retained_count": 130,
+      "leakage_filtered_count": 3,
+      "post_leakage_count": 132,
+      "support_closure_filtered_count": 2
+    },
+    "H2": {
+      "candidate_count": 105,
+      "final_retained_count": 102,
+      "leakage_filtered_count": 3,
+      "post_leakage_count": 102,
+      "support_closure_filtered_count": 0
+    },
+    "H3": {
+      "candidate_count": 90,
+      "final_retained_count": 89,
+      "leakage_filtered_count": 1,
+      "post_leakage_count": 89,
+      "support_closure_filtered_count": 0
+    }
+  },
+  "counts_by_source_entity_type": {
+    "campus": 75,
+    "city": 75,
+    "continent": 15,
+    "country": 45,
+    "course": 86,
+    "course_offering": 30,
+    "department": 74,
+    "enrollment": 30,
+    "region": 60,
+    "school": 75,
+    "student": 60,
+    "subject": 84
+  },
+  "counts_by_target_field": {
+    "administrative_type": 60,
+    "campus_name": 15,
+    "campus_type": 59,
+    "city_name": 15,
+    "climate_band": 60,
+    "continent_name": 15,
+    "country_name": 15,
+    "credit_hours": 15,
+    "currency_name": 60,
+    "delivery_mode": 15,
+    "department_name": 15,
+    "discipline_group": 28,
+    "enrollment_status": 30,
+    "final_grade": 15,
+    "focus_area": 37,
+    "founding_period": 60,
+    "meeting_period": 15,
+    "natural_anchor": 15,
+    "population_band": 60,
+    "region_name": 15,
+    "room_label": 15,
+    "scholarship_status": 15,
+    "school_name": 15,
+    "study_year": 15,
+    "subject_level": 15,
+    "subject_name": 15
+  },
+  "excluded_item_audit": {
+    "counts_by_reason": {
+      "gold_answer_contained_in_normalized_question": 9,
+      "required_h0_support_not_retained": 2
+    },
+    "total_excluded": 11
+  },
+  "excluded_items": [
+    {
+      "hop": "H0",
+      "id": "h0_attr_e8185d6d68adffc777cced7956a51398",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H0",
+      "id": "h0_attr_404bf180af6d1005238d6da8d56fec34",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_79fc1b8c15289de3370bf07f58f7696a",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_1d5ab3c39bddce68339788b49c3c668f",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_66fb913a4d035504131e4eaea239b59e",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_248b3ae664e08bfdb98d397f5661ab52",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_3ff36124315228d9d440afbfc489870d",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H2",
+      "id": "h2_aa96feaee485292cb597fbd2187cce61",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H3",
+      "id": "h3_c5224b0c5fa974ddee87afdd3b68dbbf",
+      "reason": "gold_answer_contained_in_normalized_question"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_ee697fecfdaa3b30b2b3ed500212fd94",
+      "missing_support_fact_ids": [
+        "h0_attr_e8185d6d68adffc777cced7956a51398"
+      ],
+      "reason": "required_h0_support_not_retained"
+    },
+    {
+      "hop": "H1",
+      "id": "h1_906286852844bf3cf3c6d41765d3e27c",
+      "missing_support_fact_ids": [
+        "h0_attr_404bf180af6d1005238d6da8d56fec34"
+      ],
+      "reason": "required_h0_support_not_retained"
+    }
+  ],
+  "experiment_name": "exp01_first_feasibility",
+  "final_retained_total": 709,
+  "format_version": 2,
+  "h0_attribute_count": 253,
+  "h0_fact_type_counts": {
+    "attribute": 253,
+    "relation": 135
+  },
+  "h0_relation_count": 135,
+  "leakage_filtered_counts": {
+    "H0": 2,
+    "H1": 3,
+    "H2": 3,
+    "H3": 1
+  },
+  "output_file_hashes": {
+    "H0.jsonl": "95f3163dfb185f0a1f54ba326bca612a6f1ad390c2d9d7f76d8940098e44d5b4",
+    "H1.jsonl": "9a43aa497f0a1bab0cf5a509b547159812849d5d8af0881229a10786bd4a27b7",
+    "H2.jsonl": "00de4420968ae6901256c590057c001eda7d845fa3a089937fe3a6078445a7b7",
+    "H3.jsonl": "61b17d306f5906a7d853f13b3b1e0db9824c79bee0bc930be49249be63e05936"
+  },
+  "question_template_version": "semantic_academic_closed_book_v1",
+  "requested_N": 10000,
+  "retained_counts": {
+    "H0": 388,
+    "H1": 130,
+    "H2": 102,
+    "H3": 89
+  },
+  "sft_split_method": "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev within each consecutive block of 10",
+  "sft_split_method_version": "reserved_order_9_train_1_dev_v1",
+  "source_database_manifest_sha256": "d59c01e009a3077311cca2ff63fc59afe50fa623d0f2284ef774be2f80b3e00b",
+  "source_database_sha256": "f35529b55eaa042d6257a2c613f12a64a3061885d6a169b8b3dc147ab6324217",
+  "source_evaluation_split_manifest_sha256": "08b2dbeca48e2d42cae466062699d87ccec9bb45218bf3eea280ccf5423db7df",
+  "split": "dev",
+  "support_closure_filtered_counts": {
+    "H0": 0,
+    "H1": 2,
+    "H2": 0,
+    "H3": 0
+  },
+  "zero_context": true
+}
