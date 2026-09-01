@@ -77,5 +77,16 @@ def test_default_experiment_config() -> None:
     assert config["data"]["n_sweep"]["fact_counts"] == [5_000, 10_000, 20_000]
     assert config["data"]["n_sweep"]["table_count"] == 8
     assert config["data"]["hops"] == [0, 1, 2, 3]
+    assert config["data"]["canonical_target"] == {
+        "table_count": 12,
+        "fact_count": 10_000,
+    }
+    assert config["data"]["master_world"] == {
+        "latent_positions": 12,
+        "descriptive_facts_per_chain": 29,
+        "relation_facts_per_chain": 11,
+        "experimental_facts_per_chain": 40,
+        "identifier_fields_per_chain": 12,
+    }
     assert config["training"]["fact_exposure"] == 4
     assert config["layer_study"]["enabled"] is False

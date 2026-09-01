@@ -142,9 +142,36 @@ def validate_config(config: dict[str, Any]) -> None:
         _required(master_world, "latent_positions", "data.master_world"),
         "data.master_world.latent_positions",
     )
-    atomic_facts_per_chain = _require_positive_int(
-        _required(master_world, "atomic_facts_per_chain", "data.master_world"),
-        "data.master_world.atomic_facts_per_chain",
+    descriptive_facts_per_chain = _require_positive_int(
+        _required(
+            master_world, "descriptive_facts_per_chain", "data.master_world"
+        ),
+        "data.master_world.descriptive_facts_per_chain",
+    )
+    relation_facts_per_chain = _require_positive_int(
+        _required(master_world, "relation_facts_per_chain", "data.master_world"),
+        "data.master_world.relation_facts_per_chain",
+    )
+    experimental_facts_per_chain = _require_positive_int(
+        _required(
+            master_world, "experimental_facts_per_chain", "data.master_world"
+        ),
+        "data.master_world.experimental_facts_per_chain",
+    )
+    identifier_fields_per_chain = _require_positive_int(
+        _required(master_world, "identifier_fields_per_chain", "data.master_world"),
+        "data.master_world.identifier_fields_per_chain",
+    )
+    canonical_target = _require_mapping(
+        _required(data, "canonical_target", "data"), "data.canonical_target"
+    )
+    canonical_table_count = _require_positive_int(
+        _required(canonical_target, "table_count", "data.canonical_target"),
+        "data.canonical_target.table_count",
+    )
+    canonical_fact_count = _require_positive_int(
+        _required(canonical_target, "fact_count", "data.canonical_target"),
+        "data.canonical_target.fact_count",
     )
     largest_table_count = max([*table_counts, n_sweep_table_count])
     if latent_positions < largest_table_count:
@@ -152,26 +179,42 @@ def validate_config(config: dict[str, Any]) -> None:
             "data.master_world.latent_positions must be at least the largest "
             "configured table count"
         )
-    relation_facts_per_chain = latent_positions - 1
-    attribute_facts_per_chain = (
-        atomic_facts_per_chain - latent_positions - relation_facts_per_chain
-    )
-    if attribute_facts_per_chain < 1:
+    if relation_facts_per_chain != latent_positions - 1:
         raise ConfigError(
-            "data.master_world.atomic_facts_per_chain must leave room for at least "
-            "one attribute fact after entity identifiers and adjacent relations"
+            "data.master_world.relation_facts_per_chain must equal "
+            "latent_positions - 1 for a chain topology"
         )
-    if attribute_facts_per_chain < latent_positions:
+    if identifier_fields_per_chain != latent_positions:
         raise ConfigError(
-            "data.master_world.atomic_facts_per_chain must provide at least one "
-            "attribute fact per latent position"
+            "data.master_world.identifier_fields_per_chain must equal "
+            "latent_positions"
         )
+    if experimental_facts_per_chain != (
+        descriptive_facts_per_chain + relation_facts_per_chain
+    ):
+        raise ConfigError(
+            "data.master_world.experimental_facts_per_chain must equal the sum of "
+            "descriptive and relation facts; identifier fields are excluded"
+        )
+    if (
+        latent_positions,
+        descriptive_facts_per_chain,
+        relation_facts_per_chain,
+        experimental_facts_per_chain,
+        identifier_fields_per_chain,
+    ) != (12, 29, 11, 40, 12):
+        raise ConfigError(
+            "the academic master world requires 12 positions, 29 descriptive "
+            "facts, 11 relations, 40 experimental facts, and 12 identifier fields"
+        )
+    if (canonical_table_count, canonical_fact_count) != (12, 10_000):
+        raise ConfigError("data.canonical_target must be T12/N10K")
     configured_fact_counts = [t_sweep_fact_count, *fact_counts, optional_fact_count]
     for fact_count in configured_fact_counts:
-        if fact_count % atomic_facts_per_chain != 0:
+        if fact_count % experimental_facts_per_chain != 0:
             raise ConfigError(
                 f"configured fact count {fact_count} must be exactly divisible by "
-                "data.master_world.atomic_facts_per_chain"
+                "data.master_world.experimental_facts_per_chain"
             )
 
     if data["reuse_t8_n10k"]:

@@ -27,7 +27,13 @@ data:
     fact_count: 40000
   master_world:
     latent_positions: 12
-    atomic_facts_per_chain: 40
+    descriptive_facts_per_chain: 29
+    relation_facts_per_chain: 11
+    experimental_facts_per_chain: 40
+    identifier_fields_per_chain: 12
+  canonical_target:
+    table_count: 12
+    fact_count: 10000
 
 training:
   fact_exposure: 4
