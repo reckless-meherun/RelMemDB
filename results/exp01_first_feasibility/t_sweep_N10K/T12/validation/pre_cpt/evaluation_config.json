@@ -1,0 +1,36 @@
+{
+  "N": 10000,
+  "T": 12,
+  "batch_size": 32,
+  "checkpoint_config_sha256": "b298d324da9f627bae6cf6139df78997f10fff84bad0fa33b8ea0a814c429f30",
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill",
+  "context_length": 256,
+  "decoding": {
+    "continuation_only": true,
+    "do_sample": false,
+    "num_beams": 1,
+    "pad_token_policy": "eos_if_missing",
+    "padding_side": "left",
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "experiment_name": "exp01_first_feasibility",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill",
+  "primary_metric": "normalized_exact_match",
+  "prompt_format": "Question:\n{question}\n\nAnswer:",
+  "qa_input_hashes": {
+    "H0": "890b072911dfdfd8dd36f0a67b72691ace493b913e7fa9cd4ee360135ba863e3",
+    "H1": "73d6002ad5bea18c332806f4c82d8820c968b7d85b90e00f9556341b9af1cc83",
+    "H2": "ed07caaf46d260c4e2084763a73bf00e03eb62180583bcb3105234719ec62550",
+    "H3": "fe403f194797af969e4b39a92dd23dd00e82e92895b97cd9d34826b2665a6a85"
+  },
+  "qa_manifest_sha256": "dea93834ffa9bc3d87330e75d0c2dc2a7fdc92ef2d2794947c72bc3ffe883ad3",
+  "qa_record_count": 2353,
+  "qa_split_manifest_sha256": "08b2dbeca48e2d42cae466062699d87ccec9bb45218bf3eea280ccf5423db7df",
+  "run_name": "pre_cpt",
+  "seed": 2025,
+  "split": "validation",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill",
+  "zero_context": true
+}
