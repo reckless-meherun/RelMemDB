@@ -242,6 +242,10 @@ def validate_config(config: dict[str, Any]) -> None:
     _require_positive_int(
         _required(training, "fact_exposure", "training"), "training.fact_exposure"
     )
+    _require_positive_int(
+        _required(training, "cpt_batch_size", "training"),
+        "training.cpt_batch_size",
+    )
     warmup_ratio = _require_number(
         _required(training, "warmup_ratio", "training"), "training.warmup_ratio"
     )

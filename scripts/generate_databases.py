@@ -10,6 +10,7 @@ if str(SRC_DIR) not in sys.path:
 
 from config import DEFAULT_CONFIG_PATH, load_config
 from data.materialize import build_database_manifest, materialize_database
+from data.serialize import serialize_database_cpt
 from data.world import build_master_world, build_master_world_manifest
 from utils.hashing import hash_file
 from utils.io import read_json, write_json
@@ -126,11 +127,44 @@ def _materialize_condition(
     return manifest
 
 
+def _serialize_condition_cpt(
+    *,
+    config: dict,
+    condition_dir: Path,
+    table_count: int,
+    logical_fact_count: int,
+) -> dict:
+    database_path = condition_dir / "database.sqlite"
+    database_manifest_path = condition_dir / "manifest.json"
+    cpt_dir = condition_dir / "cpt"
+    train_text_path = cpt_dir / "train.txt"
+    cpt_manifest_path = cpt_dir / "manifest.json"
+    cpt_manifest = serialize_database_cpt(
+        config,
+        database_path=database_path,
+        database_manifest_path=database_manifest_path,
+        train_text_path=train_text_path,
+        expected_table_count=table_count,
+        expected_logical_fact_count=logical_fact_count,
+    )
+    write_json(cpt_manifest_path, cpt_manifest)
+    try:
+        displayed_train_path = train_text_path.relative_to(PROJECT_ROOT)
+    except ValueError:
+        displayed_train_path = train_text_path
+    print(
+        f"cpt: T={table_count}, N={logical_fact_count}, "
+        f"exposures={cpt_manifest['fact_exposure']}, "
+        f"train={displayed_train_path}"
+    )
+    return cpt_manifest
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Rebuild the semantic master world and/or materialize one explicitly "
-            "selected database condition. No CPT or QA data is generated."
+            "Rebuild the semantic master world, materialize one database condition, "
+            "or serialize CPT text from one existing condition."
         )
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -144,13 +178,26 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="stop after rebuilding the master world",
     )
+    parser.add_argument(
+        "--serialize-cpt-only",
+        action="store_true",
+        help="serialize one existing database without rebuilding or materializing it",
+    )
     parser.add_argument("--table-count", type=int, help="physical table count T")
     parser.add_argument("--fact-count", type=int, help="experimental logical fact count N")
     args = parser.parse_args()
     if args.master_world_only and not args.rebuild_master_world:
         parser.error("--master-world-only requires --rebuild-master-world")
+    if args.serialize_cpt_only and (args.rebuild_master_world or args.master_world_only):
+        parser.error(
+            "--serialize-cpt-only cannot be combined with master-world generation"
+        )
     if (args.table_count is None) != (args.fact_count is None):
         parser.error("--table-count and --fact-count must be supplied together")
+    if args.serialize_cpt_only and args.table_count is None:
+        parser.error(
+            "--serialize-cpt-only requires --table-count and --fact-count"
+        )
     return args
 
 
@@ -158,6 +205,17 @@ def main() -> None:
     args = _parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
+    if args.serialize_cpt_only:
+        _, condition_dir = _condition_destination(
+            config, args.table_count, args.fact_count
+        )
+        _serialize_condition_cpt(
+            config=config,
+            condition_dir=condition_dir,
+            table_count=args.table_count,
+            logical_fact_count=args.fact_count,
+        )
+        return
     if args.rebuild_master_world:
         world, world_sha256, configuration_sha256 = _rebuild_master_world(
             config, config_path

@@ -15,6 +15,9 @@ from utils.paths import (
     RESULTS_DIR,
     RUNS_DIR,
     TRAINED_MODELS_DIR,
+    cpt_database_dir,
+    cpt_run_dir,
+    database_condition_dir,
     n_sweep_database_dir,
     n_sweep_qa_dir,
     t_sweep_database_dir,
@@ -89,4 +92,14 @@ def test_default_experiment_config() -> None:
         "identifier_fields_per_chain": 12,
     }
     assert config["training"]["fact_exposure"] == 4
+    assert config["training"]["cpt_batch_size"] == 32
     assert config["layer_study"]["enabled"] is False
+
+
+def test_canonical_cpt_paths() -> None:
+    condition = EXP01_GENERATED_DATABASES_DIR / "t_sweep_N10K" / "T12"
+    assert database_condition_dir(12, 10_000) == condition
+    assert cpt_database_dir(12, 10_000) == condition / "cpt"
+    assert cpt_run_dir(12, 10_000) == (
+        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "PLACEHOLDER_RUN"
+    )

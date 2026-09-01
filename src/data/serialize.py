@@ -199,12 +199,19 @@ def serialize_database_cpt(
     database_path: str | Path,
     database_manifest_path: str | Path,
     train_text_path: str | Path,
+    *,
+    expected_table_count: int | None = None,
+    expected_logical_fact_count: int | None = None,
 ) -> dict[str, Any]:
     database_path = Path(database_path)
     database_manifest_path = Path(database_manifest_path)
     train_text_path = Path(train_text_path)
-    if not database_manifest_path.is_file():
-        raise FileNotFoundError(f"database manifest not found: {database_manifest_path}")
+    for artifact_path, label in (
+        (database_path, "database"),
+        (database_manifest_path, "database manifest"),
+    ):
+        if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
+            raise FileNotFoundError(f"{label} is missing or empty: {artifact_path}")
 
     database_manifest = read_json(database_manifest_path)
     database_sha256 = hash_file(database_path)
@@ -220,6 +227,19 @@ def serialize_database_cpt(
         raise ValueError("database manifest table_count must be a positive integer")
     if database_manifest.get("T") != table_count:
         raise ValueError("database manifest T and table_count are inconsistent")
+    if expected_table_count is not None and table_count != expected_table_count:
+        raise ValueError(
+            f"database manifest T={table_count} does not match requested "
+            f"T={expected_table_count}"
+        )
+    if (
+        expected_logical_fact_count is not None
+        and requested_n != expected_logical_fact_count
+    ):
+        raise ValueError(
+            f"database manifest N={requested_n} does not match requested "
+            f"N={expected_logical_fact_count}"
+        )
 
     block, metadata = build_database_serialization_block(database_path)
     expected = {
@@ -252,9 +272,14 @@ def serialize_database_cpt(
         "source_database_sha256": database_sha256,
         "source_database_manifest_sha256": hash_file(database_manifest_path),
         "fact_exposure": fact_exposure,
+        "database_block_count": fact_exposure,
+        "database_block_sha256": hash_text(block),
+        "database_block_byte_count": len(block.encode("utf-8")),
         "logical_facts_per_exposure": metadata["logical_fact_occurrences"],
         "serialized_logical_fact_occurrences": metadata["logical_fact_occurrences"] * fact_exposure,
         "identifier_occurrences_per_exposure": metadata["identifier_occurrences"],
+        "stored_value_occurrences_per_exposure": metadata["stored_value_occurrences"],
+        "serialized_stored_value_occurrences": metadata["stored_value_occurrences"] * fact_exposure,
         "physical_rows_per_exposure": metadata["physical_row_count"],
         "serialized_row_line_count": metadata["row_line_count"] * fact_exposure,
         "table_count": metadata["table_count"],
