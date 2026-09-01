@@ -1,6 +1,8 @@
 import argparse
-from copy import deepcopy
 import math
+import re
+import sqlite3
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +12,11 @@ import scripts.generate_databases as database_script
 import scripts.train as train_script
 from config import load_config
 from data.materialize import build_database_manifest, materialize_database
-from data.serialize import build_database_serialization_block, serialize_database_cpt
+from data.serialize import (
+    SERIALIZATION_FORMAT_VERSION,
+    SERIALIZATION_STYLE,
+    serialize_database_cpt,
+)
 from data.world import build_master_world
 from training.cpt import (
     CPTArtifactError,
@@ -71,14 +77,21 @@ def cpt_config() -> dict[str, Any]:
 
 
 def _temporary_condition(
-    tmp_path: Path, config: dict[str, Any], *, serialize: bool = True
+    tmp_path: Path,
+    config: dict[str, Any],
+    *,
+    table_count: int = 12,
+    fact_count: int = 200,
+    serialize: bool = True,
 ) -> dict[str, Path]:
     condition_dir = tmp_path / "condition"
     condition_dir.mkdir()
     database_path = condition_dir / "database.sqlite"
     database_manifest_path = condition_dir / "manifest.json"
     world = build_master_world(config)
-    materialization = materialize_database(world, 12, 200, database_path)
+    materialization = materialize_database(
+        world, table_count, fact_count, database_path
+    )
     database_manifest = build_database_manifest(
         config,
         materialization,
@@ -89,6 +102,7 @@ def _temporary_condition(
     )
     write_json(database_manifest_path, database_manifest)
     cpt_dir = condition_dir / "cpt"
+    readable_book_path = cpt_dir / "book_readable.txt"
     train_text_path = cpt_dir / "train.txt"
     cpt_manifest_path = cpt_dir / "manifest.json"
     if serialize:
@@ -97,34 +111,184 @@ def _temporary_condition(
             database_path,
             database_manifest_path,
             train_text_path,
-            expected_table_count=12,
-            expected_logical_fact_count=200,
+            readable_book_path=readable_book_path,
+            expected_table_count=table_count,
+            expected_logical_fact_count=fact_count,
         )
         write_json(cpt_manifest_path, cpt_manifest)
     return {
         "condition_dir": condition_dir,
         "database": database_path,
         "database_manifest": database_manifest_path,
+        "readable_book": readable_book_path,
         "train_text": train_text_path,
         "cpt_manifest": cpt_manifest_path,
     }
 
 
-def test_x4_serialization_is_four_exact_complete_blocks(
+def test_readable_book_is_natural_complete_and_repeated_exactly_x4(
     tmp_path: Path, cpt_config: dict[str, Any]
 ) -> None:
     paths = _temporary_condition(tmp_path, cpt_config)
-    block, block_metadata = build_database_serialization_block(paths["database"])
+    readable_book = read_text(paths["readable_book"])
     train_text = read_text(paths["train_text"])
     manifest = read_json(paths["cpt_manifest"])
 
-    assert train_text == block * 4
-    assert manifest["fact_exposure"] == manifest["database_block_count"] == 4
+    assert readable_book.startswith("The Academic Database Book\n\nA continent")
+    assert train_text == readable_book * 4
+    assert manifest["format_version"] == SERIALIZATION_FORMAT_VERSION == 3
+    assert manifest["serialization_style"] == SERIALIZATION_STYLE
+    assert manifest["fact_exposure"] == 4
+    assert manifest["readable_book_copy_count_in_train_text"] == 4
     assert manifest["logical_facts_per_exposure"] == 200
+    assert manifest["attribute_facts_per_exposure"] == 145
+    assert manifest["relation_facts_per_exposure"] == 55
     assert manifest["serialized_logical_fact_occurrences"] == 800
-    assert manifest["stored_value_occurrences_per_exposure"] == 260
-    assert manifest["serialized_stored_value_occurrences"] == 1_040
-    assert block_metadata["stored_value_occurrences"] == 260
+    assert manifest["identifiers_in_readable_book"] == 0
+    assert manifest["source_identifier_count"] == 60
+    assert manifest["readable_book_sha256"] == hash_file(paths["readable_book"])
+
+    prohibited = (
+        "BEGIN_DATABASE",
+        "END_DATABASE",
+        "SCHEMA",
+        "DATA\n",
+        "TABLE ",
+        "COLUMNS ",
+        "PRIMARY_KEY",
+        "FOREIGN_KEY",
+        "ROW ",
+        "CREATE TABLE",
+        "SELECT ",
+    )
+    assert not any(marker in readable_book for marker in prohibited)
+    assert not re.search(r"\b[a-z][a-z0-9_]*=", readable_book)
+    assert not re.search(
+        r"\b(?:CTN|CTR|REG|CTY|CAM|SCH|DEP|SUB|CRS|OFF|ENR|STU)\d{6}\b",
+        readable_book,
+    )
+    with sqlite3.connect(paths["database"]) as connection:
+        raw_identifiers = [
+            row[0]
+            for table, id_field in (
+                ("continent", "continent_id"),
+                ("country", "country_id"),
+                ("region", "region_id"),
+                ("city", "city_id"),
+                ("campus", "campus_id"),
+                ("school", "school_id"),
+                ("department", "department_id"),
+                ("subject", "subject_id"),
+                ("course", "course_id"),
+                ("course_offering", "offering_id"),
+                ("enrollment", "enrollment_id"),
+                ("student", "student_id"),
+            )
+            for row in connection.execute(f'SELECT "{id_field}" FROM "{table}"')
+        ]
+    assert all(identifier not in readable_book for identifier in raw_identifiers)
+    assert "Eastern Ancient Oak Isles is a continent with a polar climate band." in readable_book
+    assert "Golden Glenovia Federation belongs to Eastern Ancient Oak Isles." in readable_book
+    assert "Section G03 of Bright Markets and Institutions" in readable_book
+    assert "Ravi K. Novak's primary enrollment is the Spring 2026 enrollment" in readable_book
+
+
+def test_serialization_is_byte_deterministic(
+    tmp_path: Path, cpt_config: dict[str, Any]
+) -> None:
+    paths = _temporary_condition(tmp_path, cpt_config, serialize=False)
+    outputs = []
+    for suffix in ("first", "second"):
+        book_path = tmp_path / suffix / "book_readable.txt"
+        train_path = tmp_path / suffix / "train.txt"
+        manifest = serialize_database_cpt(
+            cpt_config,
+            paths["database"],
+            paths["database_manifest"],
+            train_path,
+            readable_book_path=book_path,
+            expected_table_count=12,
+            expected_logical_fact_count=200,
+        )
+        outputs.append((book_path.read_bytes(), train_path.read_bytes(), manifest))
+    assert outputs[0] == outputs[1]
+
+
+def test_physical_t_grouping_is_preserved_without_changing_logical_coverage(
+    tmp_path: Path, cpt_config: dict[str, Any]
+) -> None:
+    expected_groups = {
+        4: [
+            ["continent", "country", "region"],
+            ["city", "campus", "school"],
+            ["department", "subject", "course"],
+            ["course_offering", "enrollment", "student"],
+        ],
+        8: [
+            ["continent", "country"],
+            ["region", "city"],
+            ["campus", "school"],
+            ["department", "subject"],
+            ["course"],
+            ["course_offering"],
+            ["enrollment"],
+            ["student"],
+        ],
+        12: [[spec] for spec in (
+            "continent",
+            "country",
+            "region",
+            "city",
+            "campus",
+            "school",
+            "department",
+            "subject",
+            "course",
+            "course_offering",
+            "enrollment",
+            "student",
+        )],
+    }
+    coverage_hashes = set()
+    readable_books = set()
+    for table_count in (4, 8, 12):
+        fixture_root = tmp_path / f"t{table_count}"
+        fixture_root.mkdir()
+        paths = _temporary_condition(
+            fixture_root, cpt_config, table_count=table_count
+        )
+        manifest = read_json(paths["cpt_manifest"])
+        readable_book = read_text(paths["readable_book"])
+        groups = manifest["physical_record_groups"]
+        assert manifest["physical_record_group_count"] == table_count
+        assert [group["entity_types"] for group in groups] == expected_groups[
+            table_count
+        ]
+        assert readable_book.count("physical record group.") == table_count
+        coverage_hashes.add(manifest["logical_fact_coverage_sha256"])
+        readable_books.add(readable_book)
+    assert len(coverage_hashes) == 1
+    assert len(readable_books) == 3
+
+
+def test_t12_n10k_temporary_book_accounts_for_all_canonical_facts(
+    tmp_path: Path,
+) -> None:
+    paths = _temporary_condition(
+        tmp_path, load_config(), table_count=12, fact_count=10_000
+    )
+    manifest = read_json(paths["cpt_manifest"])
+    assert manifest["logical_facts_per_exposure"] == 10_000
+    assert manifest["attribute_facts_per_exposure"] == 7_250
+    assert manifest["relation_facts_per_exposure"] == 2_750
+    assert manifest["logical_entities_per_exposure"] == 3_000
+    assert manifest["source_identifier_count"] == 3_000
+    assert manifest["identifiers_in_readable_book"] == 0
+    assert all(
+        group["row_count"] == 250
+        for group in manifest["physical_record_groups"]
+    )
+    assert read_text(paths["train_text"]) == read_text(paths["readable_book"]) * 4
 
 
 def test_serialization_only_mode_never_loads_world_or_rematerializes_database(
@@ -164,6 +328,7 @@ def test_serialization_only_mode_never_loads_world_or_rematerializes_database(
     database_script.main()
 
     assert hash_file(paths["database"]) == database_sha256
+    assert paths["readable_book"].stat().st_size > 0
     assert paths["train_text"].stat().st_size > 0
     assert paths["cpt_manifest"].stat().st_size > 0
 
@@ -178,6 +343,7 @@ def test_cpt_provenance_verification_and_hash_failures(
         fact_count=200,
         database_path=paths["database"],
         database_manifest_path=paths["database_manifest"],
+        readable_book_path=paths["readable_book"],
         train_text_path=paths["train_text"],
         cpt_manifest_path=paths["cpt_manifest"],
     )
@@ -185,6 +351,9 @@ def test_cpt_provenance_verification_and_hash_failures(
     assert provenance["N"] == 200
     assert provenance["fact_exposure"] == 4
     assert provenance["source_database_sha256"] == hash_file(paths["database"])
+    assert provenance["readable_book_sha256"] == hash_file(
+        paths["readable_book"]
+    )
 
     paths["train_text"].write_text(
         read_text(paths["train_text"]) + "tampered", encoding="utf-8"
@@ -196,8 +365,28 @@ def test_cpt_provenance_verification_and_hash_failures(
             fact_count=200,
             database_path=paths["database"],
             database_manifest_path=paths["database_manifest"],
+            readable_book_path=paths["readable_book"],
             train_text_path=paths["train_text"],
             cpt_manifest_path=paths["cpt_manifest"],
+        )
+
+    readable_tamper_root = tmp_path / "readable-tamper"
+    readable_tamper_root.mkdir()
+    readable_paths = _temporary_condition(readable_tamper_root, cpt_config)
+    readable_paths["readable_book"].write_text(
+        read_text(readable_paths["readable_book"]) + "tampered",
+        encoding="utf-8",
+    )
+    with pytest.raises(CPTArtifactError, match="readable-book hash"):
+        verify_cpt_artifacts(
+            cpt_config,
+            table_count=12,
+            fact_count=200,
+            database_path=readable_paths["database"],
+            database_manifest_path=readable_paths["database_manifest"],
+            readable_book_path=readable_paths["readable_book"],
+            train_text_path=readable_paths["train_text"],
+            cpt_manifest_path=readable_paths["cpt_manifest"],
         )
 
 
@@ -215,6 +404,7 @@ def test_inconsistent_t_n_and_empty_artifacts_fail_clearly(
             fact_count=200,
             database_path=paths["database"],
             database_manifest_path=paths["database_manifest"],
+            readable_book_path=paths["readable_book"],
             train_text_path=paths["train_text"],
             cpt_manifest_path=paths["cpt_manifest"],
         )
@@ -227,6 +417,7 @@ def test_inconsistent_t_n_and_empty_artifacts_fail_clearly(
             fact_count=200,
             database_path=paths["database"],
             database_manifest_path=paths["database_manifest"],
+            readable_book_path=paths["readable_book"],
             train_text_path=paths["train_text"],
             cpt_manifest_path=paths["cpt_manifest"],
         )
@@ -328,6 +519,7 @@ def test_canonical_cpt_and_run_path_resolution() -> None:
         load_config(), table_count=12, fact_count=10_000
     )
     assert paths["database"] == condition / "database.sqlite"
+    assert paths["readable_book"] == condition / "cpt" / "book_readable.txt"
     assert paths["train_text"] == condition / "cpt" / "train.txt"
     assert paths["cpt_manifest"] == condition / "cpt" / "manifest.json"
     assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k"

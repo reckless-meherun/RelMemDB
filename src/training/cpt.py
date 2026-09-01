@@ -6,9 +6,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from utils.hashing import hash_bytes, hash_file
+from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
+from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
-
 
 CPT_EPOCHS = 1
 ADAMW_DEFAULT_WEIGHT_DECAY = 0.01
@@ -34,12 +34,16 @@ def verify_cpt_artifacts(
     fact_count: int,
     database_path: str | Path,
     database_manifest_path: str | Path,
+    readable_book_path: str | Path,
     train_text_path: str | Path,
     cpt_manifest_path: str | Path,
 ) -> dict[str, Any]:
     database_path = _require_nonempty_file(database_path, "database")
     database_manifest_path = _require_nonempty_file(
         database_manifest_path, "database manifest"
+    )
+    readable_book_path = _require_nonempty_file(
+        readable_book_path, "CPT readable book"
     )
     train_text_path = _require_nonempty_file(train_text_path, "CPT train text")
     cpt_manifest_path = _require_nonempty_file(cpt_manifest_path, "CPT manifest")
@@ -48,6 +52,7 @@ def verify_cpt_artifacts(
     cpt_manifest = read_json(cpt_manifest_path)
     database_sha256 = hash_file(database_path)
     database_manifest_sha256 = hash_file(database_manifest_path)
+    readable_book_sha256 = hash_file(readable_book_path)
     train_text_sha256 = hash_file(train_text_path)
     cpt_manifest_sha256 = hash_file(cpt_manifest_path)
 
@@ -63,12 +68,16 @@ def verify_cpt_artifacts(
             raise CPTArtifactError(f"{label} N metadata does not match N={fact_count}")
     if database_manifest.get("actual_logical_fact_count") != fact_count:
         raise CPTArtifactError("database manifest actual logical fact count is inconsistent")
+    if cpt_manifest.get("format_version") != SERIALIZATION_FORMAT_VERSION:
+        raise CPTArtifactError("CPT serialization format version is unsupported")
+    if cpt_manifest.get("serialization_style") != SERIALIZATION_STYLE:
+        raise CPTArtifactError("CPT serialization style is unsupported")
 
     fact_exposure = config["training"]["fact_exposure"]
     if cpt_manifest.get("fact_exposure") != fact_exposure:
         raise CPTArtifactError("CPT fact exposure does not match the experiment config")
-    if cpt_manifest.get("database_block_count") != fact_exposure:
-        raise CPTArtifactError("CPT database block count does not match fact exposure")
+    if cpt_manifest.get("readable_book_copy_count_in_train_text") != fact_exposure:
+        raise CPTArtifactError("CPT readable-book copy count does not match fact exposure")
     if cpt_manifest.get("source_database_sha256") != database_sha256:
         raise CPTArtifactError("CPT manifest source database hash is inconsistent")
     if (
@@ -78,6 +87,8 @@ def verify_cpt_artifacts(
         raise CPTArtifactError("CPT manifest source database-manifest hash is inconsistent")
     if cpt_manifest.get("train_text_sha256") != train_text_sha256:
         raise CPTArtifactError("CPT train-text hash does not match its manifest")
+    if cpt_manifest.get("readable_book_sha256") != readable_book_sha256:
+        raise CPTArtifactError("CPT readable-book hash does not match its manifest")
     if cpt_manifest.get("logical_facts_per_exposure") != fact_count:
         raise CPTArtifactError("CPT logical facts per exposure are inconsistent")
     if cpt_manifest.get("serialized_logical_fact_occurrences") != (
@@ -85,12 +96,17 @@ def verify_cpt_artifacts(
     ):
         raise CPTArtifactError("CPT serialized logical-fact accounting is inconsistent")
 
+    readable_book_bytes = readable_book_path.read_bytes()
     train_bytes = train_text_path.read_bytes()
     try:
+        readable_book = readable_book_bytes.decode("utf-8")
         train_text = train_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise CPTArtifactError("CPT train text is not valid UTF-8") from exc
+        raise CPTArtifactError("CPT readable book or train text is not valid UTF-8") from exc
     expected_statistics = {
+        "readable_book_byte_count": len(readable_book_bytes),
+        "readable_book_character_count": len(readable_book),
+        "readable_book_line_count": readable_book.count("\n"),
         "train_text_byte_count": len(train_bytes),
         "train_text_character_count": len(train_text),
         "train_text_line_count": train_text.count("\n"),
@@ -99,26 +115,23 @@ def verify_cpt_artifacts(
         if cpt_manifest.get(key) != actual_value:
             raise CPTArtifactError(f"CPT manifest {key} is inconsistent")
 
-    block_size = cpt_manifest.get("database_block_byte_count")
-    block_sha256 = cpt_manifest.get("database_block_sha256")
-    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size <= 0:
-        raise CPTArtifactError("CPT database block byte count is invalid")
-    if len(train_bytes) != block_size * fact_exposure:
-        raise CPTArtifactError("CPT text is not exactly fact_exposure complete blocks")
-    for block_index in range(fact_exposure):
-        start = block_index * block_size
-        if hash_bytes(train_bytes[start : start + block_size]) != block_sha256:
-            raise CPTArtifactError(f"CPT database block {block_index} is inconsistent")
+    if train_bytes != readable_book_bytes * fact_exposure:
+        raise CPTArtifactError(
+            "CPT train text is not exactly fact_exposure copies of the readable book"
+        )
 
     return {
         "T": table_count,
         "N": fact_count,
         "source_database_sha256": database_sha256,
         "database_manifest_sha256": database_manifest_sha256,
+        "readable_book_sha256": readable_book_sha256,
         "cpt_train_text_sha256": train_text_sha256,
         "cpt_manifest_sha256": cpt_manifest_sha256,
         "fact_exposure": fact_exposure,
-        "database_block_count": fact_exposure,
+        "readable_book_copy_count_in_train_text": fact_exposure,
+        "serialization_style": SERIALIZATION_STYLE,
+        "readable_book_byte_count": len(readable_book_bytes),
         "train_text_byte_count": len(train_bytes),
     }
 
@@ -300,6 +313,7 @@ def run_cpt_training(
     train_log_path: str | Path,
     database_path: str | Path,
     database_manifest_path: str | Path,
+    readable_book_path: str | Path,
     train_text_path: str | Path,
     cpt_manifest_path: str | Path,
 ) -> dict[str, Any]:
@@ -326,6 +340,7 @@ def run_cpt_training(
         fact_count=fact_count,
         database_path=database_path,
         database_manifest_path=database_manifest_path,
+        readable_book_path=readable_book_path,
         train_text_path=train_text_path,
         cpt_manifest_path=cpt_manifest_path,
     )

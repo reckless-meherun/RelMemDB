@@ -7,7 +7,6 @@ import argparse
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -50,6 +49,7 @@ def build_cpt_paths(
     return {
         "database": condition_dir / "database.sqlite",
         "database_manifest": condition_dir / "manifest.json",
+        "readable_book": cpt_dir / "book_readable.txt",
         "train_text": cpt_dir / "train.txt",
         "cpt_manifest": cpt_dir / "manifest.json",
         "run_config": run_dir / f"{stem}_config_PLACEHOLDER.yaml",
@@ -88,6 +88,7 @@ def main() -> None:
         train_log_path=paths["train_log"],
         database_path=paths["database"],
         database_manifest_path=paths["database_manifest"],
+        readable_book_path=paths["readable_book"],
         train_text_path=paths["train_text"],
         cpt_manifest_path=paths["cpt_manifest"],
     )

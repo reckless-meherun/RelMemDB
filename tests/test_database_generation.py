@@ -1,15 +1,15 @@
+import re
+import sqlite3
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
-import re
-import sqlite3
 from typing import Any
 
 import pytest
 
 from config import ConfigError, load_config, validate_config
 from data.materialize import materialize_database, partition_latent_positions
-from data.serialize import build_database_serialization_block, inspect_database_schema
+from data.serialize import build_readable_database_book, inspect_database_schema
 from data.world import (
     IDENTIFIER_MODULUS,
     NATURAL_IDENTIFIER_FIELDS,
@@ -18,7 +18,6 @@ from data.world import (
     derive_master_world_counts,
 )
 from utils.hashing import hash_file, hash_json_object
-
 
 CANONICAL_SCHEMA = {
     "continent": ["continent_id", "continent_name", "climate_band"],
@@ -327,16 +326,19 @@ def test_future_n_subsets_are_prefix_nested(
     assert world["chains"][:250] == world["chains"][:500][:250]
 
 
-def test_serialization_schema_assumptions_exclude_identifiers(
+def test_readable_book_coverage_excludes_identifiers(
     tmp_path: Path, world: dict[str, Any]
 ) -> None:
     path = tmp_path / "semantic.sqlite"
-    materialize_database(world, 12, 200, path)
-    block, metadata = build_database_serialization_block(path)
-    assert "TABLE student" in block
-    assert "TABLE course_offering" in block
-    assert "credit_hours=" in block
+    materialization = materialize_database(world, 12, 200, path)
+    book, metadata = build_readable_database_book(path, materialization)
+    assert "A student represents a student and their study information." in book
+    assert "Course Offering Records" in book
+    assert "2-credit online course" in book
+    assert "PRIMARY_KEY" not in book
+    assert "credit_hours=" not in book
     assert metadata["logical_fact_occurrences"] == 200
-    assert metadata["identifier_occurrences"] == 60
-    assert metadata["stored_value_occurrences"] == 260
+    assert metadata["attribute_fact_occurrences"] == 145
+    assert metadata["relation_fact_occurrences"] == 55
+    assert metadata["source_identifier_count"] == 60
     assert metadata["schema_relationship_count"] == 11

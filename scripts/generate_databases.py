@@ -2,7 +2,6 @@ import argparse
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -137,6 +136,7 @@ def _serialize_condition_cpt(
     database_path = condition_dir / "database.sqlite"
     database_manifest_path = condition_dir / "manifest.json"
     cpt_dir = condition_dir / "cpt"
+    readable_book_path = cpt_dir / "book_readable.txt"
     train_text_path = cpt_dir / "train.txt"
     cpt_manifest_path = cpt_dir / "manifest.json"
     cpt_manifest = serialize_database_cpt(
@@ -144,6 +144,7 @@ def _serialize_condition_cpt(
         database_path=database_path,
         database_manifest_path=database_manifest_path,
         train_text_path=train_text_path,
+        readable_book_path=readable_book_path,
         expected_table_count=table_count,
         expected_logical_fact_count=logical_fact_count,
     )
@@ -155,7 +156,7 @@ def _serialize_condition_cpt(
     print(
         f"cpt: T={table_count}, N={logical_fact_count}, "
         f"exposures={cpt_manifest['fact_exposure']}, "
-        f"train={displayed_train_path}"
+        f"book={readable_book_path.name}, train={displayed_train_path}"
     )
     return cpt_manifest
 
