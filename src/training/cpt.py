@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import random
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,6 @@ from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
 
-CPT_EPOCHS = 1
 ADAMW_DEFAULT_WEIGHT_DECAY = 0.01
 ADAMW_DEFAULT_BETAS = (0.9, 0.999)
 ADAMW_DEFAULT_EPSILON = 1e-8
@@ -250,16 +250,19 @@ def build_cpt_training_plan(
     if config["experiment"]["seed"] != 2025:
         raise ValueError("CPT requires experiment.seed=2025")
     batch_size = training["cpt_batch_size"]
-    optimizer_steps = math.ceil(sequence_count / batch_size)
+    epochs = training["cpt_epochs"]
+    steps_per_epoch = math.ceil(sequence_count / batch_size)
+    optimizer_steps = steps_per_epoch * epochs
     warmup_steps = math.ceil(optimizer_steps * training["warmup_ratio"])
     return {
         "stage": "cpt",
         "T": table_count,
         "N": fact_count,
         "seed": config["experiment"]["seed"],
-        "epochs": CPT_EPOCHS,
-        "passes_over_serialized_corpus": 1,
+        "epochs": epochs,
+        "passes_over_serialized_corpus": epochs,
         "fact_exposure": training["fact_exposure"],
+        "effective_fact_exposure": training["fact_exposure"] * epochs,
         "context_length": training["context_length"],
         "batch_size": batch_size,
         "shuffle": False,
@@ -274,8 +277,18 @@ def build_cpt_training_plan(
         "max_grad_norm": training["max_grad_norm"],
         "precision": "bf16",
         "sequence_count": sequence_count,
+        "steps_per_epoch": steps_per_epoch,
+        "total_optimizer_steps": optimizer_steps,
         "optimizer_steps": optimizer_steps,
     }
+
+
+def _iterate_cpt_batches(
+    loader: Any, epochs: int
+) -> Iterator[tuple[int, int, Any]]:
+    for epoch in range(1, epochs + 1):
+        for step_in_epoch, batch in enumerate(loader, start=1):
+            yield epoch, step_in_epoch, batch
 
 
 def _load_model_and_tokenizer(source_checkpoint: Path) -> tuple[Any, Any]:
@@ -400,7 +413,7 @@ def run_cpt_training(
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=plan["warmup_steps"],
-        num_training_steps=plan["optimizer_steps"],
+        num_training_steps=plan["total_optimizer_steps"],
     )
     run_record = {
         "experiment": config["experiment"]["name"],
@@ -415,7 +428,11 @@ def run_cpt_training(
         "model_class": model.__class__.__name__,
         "full_parameter_training": True,
         "target_qa_used": False,
-        "checkpoint_selection": "final_state_after_one_corpus_pass",
+        "checkpoint_selection": "final_state_after_configured_cpt_epochs",
+        "epochs": plan["epochs"],
+        "steps_per_epoch": plan["steps_per_epoch"],
+        "optimizer_steps": plan["optimizer_steps"],
+        "effective_fact_exposure": plan["effective_fact_exposure"],
         "provenance": provenance,
         "tokenization": token_statistics,
         "training": plan,
@@ -427,7 +444,9 @@ def run_cpt_training(
     loss_token_count = 0
     observed_supervised_tokens = 0
     optimizer.zero_grad(set_to_none=True)
-    for step, batch in enumerate(loader, start=1):
+    for step, (epoch, step_in_epoch, batch) in enumerate(
+        _iterate_cpt_batches(loader, plan["epochs"]), start=1
+    ):
         batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
         observed_supervised_tokens += int((batch["labels"] != -100).sum().item())
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -447,6 +466,8 @@ def run_cpt_training(
             {
                 "record_type": "optimizer_step",
                 "step": step,
+                "epoch": epoch,
+                "step_in_epoch": step_in_epoch,
                 "loss": float(loss.detach().item()),
                 "learning_rate": float(scheduler.get_last_lr()[0]),
                 "gradient_norm": float(gradient_norm),
@@ -456,8 +477,13 @@ def run_cpt_training(
 
     if len(step_records) != plan["optimizer_steps"]:
         raise RuntimeError("CPT optimizer-step accounting is inconsistent")
-    if observed_supervised_tokens != token_statistics["supervised_tokens"]:
-        raise RuntimeError("CPT training did not consume every supervised token once")
+    expected_supervised_tokens = (
+        token_statistics["supervised_tokens"] * plan["epochs"]
+    )
+    if observed_supervised_tokens != expected_supervised_tokens:
+        raise RuntimeError(
+            "CPT training did not consume every supervised token once per epoch"
+        )
 
     output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     output_checkpoint.mkdir(parents=True, exist_ok=True)

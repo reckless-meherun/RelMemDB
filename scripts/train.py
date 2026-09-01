@@ -41,9 +41,10 @@ def build_cpt_paths(
     cpt_dir = cpt_database_dir(table_count, fact_count)
     run_dir = cpt_run_dir(table_count, fact_count)
     layer_count = config["model"]["layers"]
+    epochs = config["training"]["cpt_epochs"]
     stem = (
         f"exp01_tsweep_T{table_count}_N{fact_count // 1000}K_"
-        f"L{layer_count}"
+        f"L{layer_count}_E{epochs}"
     )
     model_name = config["model"]["name"].replace("/", "_")
     return {
@@ -56,7 +57,10 @@ def build_cpt_paths(
         "train_log": run_dir / f"{stem}_trainlog_PLACEHOLDER.jsonl",
         "output_checkpoint": (
             TRAINED_MODELS_DIR
-            / f"{model_name}_cpt_t{table_count}_{_fact_count_label(fact_count)}"
+            / (
+                f"{model_name}_cpt_t{table_count}_"
+                f"{_fact_count_label(fact_count)}_e{epochs}"
+            )
         ),
     }
 

@@ -38,6 +38,7 @@ data:
 training:
   fact_exposure: 4
   cpt_batch_size: 32
+  cpt_epochs: 10
   optimizer: adamw
   learning_rate: 5.0e-5
   scheduler: cosine

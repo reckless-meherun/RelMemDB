@@ -20,6 +20,7 @@ from data.serialize import (
 from data.world import build_master_world
 from training.cpt import (
     CPTArtifactError,
+    _iterate_cpt_batches,
     build_cpt_training_plan,
     chunk_token_ids,
     enable_full_parameter_training,
@@ -521,22 +522,36 @@ def test_exact_multiple_has_no_partial_chunk() -> None:
     assert statistics["padding_token_count"] == 0
 
 
-def test_training_plan_is_exactly_one_pass(cpt_config: dict[str, Any]) -> None:
+def test_training_plan_uses_ten_full_epochs(cpt_config: dict[str, Any]) -> None:
     plan = build_cpt_training_plan(
-        cpt_config, table_count=12, fact_count=10_000, sequence_count=65
+        cpt_config, table_count=12, fact_count=10_000, sequence_count=1_489
     )
-    assert plan["epochs"] == plan["passes_over_serialized_corpus"] == 1
+    assert plan["epochs"] == plan["passes_over_serialized_corpus"] == 10
     assert plan["fact_exposure"] == 4
+    assert plan["effective_fact_exposure"] == 40
     assert plan["context_length"] == 256
     assert plan["batch_size"] == 32
-    assert plan["optimizer_steps"] == 3
-    assert plan["warmup_steps"] == 1
+    assert plan["steps_per_epoch"] == 47
+    assert plan["total_optimizer_steps"] == 470
+    assert plan["optimizer_steps"] == 470
+    assert plan["warmup_steps"] == 24
     assert plan["optimizer"] == "AdamW"
     assert plan["betas"] == [0.9, 0.999]
     assert plan["epsilon"] == 1e-8
     assert plan["weight_decay"] == 0.01
     assert plan["scheduler"] == "cosine"
     assert plan["shuffle"] is False
+
+
+def test_epoch_iterator_repeats_the_complete_loader_exactly_ten_times() -> None:
+    loader = ["first", "second", "third"]
+    batches = list(_iterate_cpt_batches(loader, 10))
+    assert len(batches) == 30
+    assert [epoch for epoch, _, _ in batches] == [
+        epoch for epoch in range(1, 11) for _ in loader
+    ]
+    assert [step for _, step, _ in batches] == list(range(1, 4)) * 10
+    assert [batch for _, _, batch in batches] == loader * 10
 
 
 def test_cpt_enables_every_model_parameter() -> None:
@@ -562,7 +577,9 @@ def test_canonical_cpt_and_run_path_resolution() -> None:
     assert paths["readable_book"] == condition / "cpt" / "book_readable.txt"
     assert paths["train_text"] == condition / "cpt" / "train.txt"
     assert paths["cpt_manifest"] == condition / "cpt" / "manifest.json"
-    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k"
+    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k_e10"
+    assert paths["run_config"].name.endswith("L12_E10_config_PLACEHOLDER.yaml")
+    assert paths["train_log"].name.endswith("L12_E10_trainlog_PLACEHOLDER.jsonl")
 
 
 def test_source_checkpoint_must_exist(tmp_path: Path) -> None:

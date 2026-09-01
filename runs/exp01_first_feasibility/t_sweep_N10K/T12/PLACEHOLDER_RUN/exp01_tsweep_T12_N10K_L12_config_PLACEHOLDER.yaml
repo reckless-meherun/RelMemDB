@@ -1,0 +1,57 @@
+experiment: exp01_first_feasibility
+source_checkpoint: /home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill
+final_checkpoint_path: /home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_cpt_t12_n10k
+source_checkpoint_config_sha256: b298d324da9f627bae6cf6139df78997f10fff84bad0fa33b8ea0a814c429f30
+tokenizer_identity: /home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill
+model_identity: /home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_relational_skill
+tokenizer_class: GPT2TokenizerFast
+model_class: GPT2LMHeadModel
+full_parameter_training: true
+target_qa_used: false
+checkpoint_selection: final_state_after_one_corpus_pass
+provenance:
+  T: 12
+  N: 10000
+  source_database_sha256: f35529b55eaa042d6257a2c613f12a64a3061885d6a169b8b3dc147ab6324217
+  database_manifest_sha256: d59c01e009a3077311cca2ff63fc59afe50fa623d0f2284ef774be2f80b3e00b
+  readable_book_sha256: 27a6270314c87027dc41ea27d92981d32d98407fe96cec49abc8b14dd2fb38c0
+  cpt_train_text_sha256: ae858057401b837b00bf801e24be093377e3544b2ce513e559ae5ecb119d28af
+  cpt_manifest_sha256: 3a7deda1f6877570a699a5385750d85b61e658bc204d0605852ce6694aea9e32
+  fact_exposure: 4
+  readable_book_copy_count_in_train_text: 4
+  serialization_style: natural_language_db_book_v1
+  readable_book_byte_count: 449655
+  train_text_byte_count: 1798620
+tokenization:
+  total_tokens: 380968
+  supervised_tokens: 380968
+  sequence_count: 1489
+  context_length: 256
+  final_partial_sequence_size: 40
+  final_sequence_real_token_count: 40
+  padding_token_count: 216
+training:
+  stage: cpt
+  T: 12
+  N: 10000
+  seed: 2025
+  epochs: 1
+  passes_over_serialized_corpus: 1
+  fact_exposure: 4
+  context_length: 256
+  batch_size: 32
+  shuffle: false
+  optimizer: AdamW
+  learning_rate: 5.0e-05
+  weight_decay: 0.01
+  betas:
+  - 0.9
+  - 0.999
+  epsilon: 1.0e-08
+  scheduler: cosine
+  warmup_ratio: 0.05
+  warmup_steps: 3
+  max_grad_norm: 1.0
+  precision: bf16
+  sequence_count: 1489
+  optimizer_steps: 47

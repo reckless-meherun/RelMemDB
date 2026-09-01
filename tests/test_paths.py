@@ -93,6 +93,7 @@ def test_default_experiment_config() -> None:
     }
     assert config["training"]["fact_exposure"] == 4
     assert config["training"]["cpt_batch_size"] == 32
+    assert config["training"]["cpt_epochs"] == 10
     assert config["layer_study"]["enabled"] is False
 
 
