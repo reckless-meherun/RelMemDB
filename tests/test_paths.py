@@ -1,3 +1,5 @@
+import pytest
+
 from config import DEFAULT_CONFIG_PATH, load_config
 from utils.paths import (
     BASE_MODELS_DIR,
@@ -18,6 +20,7 @@ from utils.paths import (
     cpt_database_dir,
     cpt_run_dir,
     database_condition_dir,
+    evaluation_result_dir,
     n_sweep_database_dir,
     n_sweep_qa_dir,
     qa_condition_dir,
@@ -95,6 +98,14 @@ def test_default_experiment_config() -> None:
     assert config["training"]["fact_exposure"] == 4
     assert config["training"]["cpt_batch_size"] == 32
     assert config["training"]["cpt_epochs"] == 10
+    assert config["evaluation"] == {
+        "decoding": "greedy",
+        "temperature": 0.0,
+        "primary_metric": "normalized_exact_match",
+        "batch_size": 32,
+        "context_length": 256,
+        "max_new_tokens": 64,
+    }
     assert config["layer_study"]["enabled"] is False
 
 
@@ -111,3 +122,22 @@ def test_canonical_closed_book_qa_path() -> None:
     assert qa_condition_dir(12, 10_000) == (
         EXP01_QA_DIR / "t_sweep_N10K" / "T12"
     )
+
+
+def test_canonical_closed_book_evaluation_result_paths() -> None:
+    assert evaluation_result_dir(12, 10_000, "validation", "pre_cpt") == (
+        EXP01_RESULTS_DIR
+        / "t_sweep_N10K"
+        / "T12"
+        / "validation"
+        / "pre_cpt"
+    )
+    assert evaluation_result_dir(12, 10_000, "validation", "post_cpt_e10") == (
+        EXP01_RESULTS_DIR
+        / "t_sweep_N10K"
+        / "T12"
+        / "validation"
+        / "post_cpt_e10"
+    )
+    with pytest.raises(ValueError, match="filesystem-safe"):
+        evaluation_result_dir(12, 10_000, "validation", "../escape")

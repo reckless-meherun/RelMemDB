@@ -3,7 +3,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[1]
     / "configs"
@@ -284,8 +283,32 @@ def validate_config(config: dict[str, Any]) -> None:
     temperature = _require_number(
         _required(evaluation, "temperature", "evaluation"), "evaluation.temperature"
     )
-    if temperature < 0:
-        raise ConfigError("evaluation.temperature must be non-negative")
+    if temperature != 0.0:
+        raise ConfigError("evaluation.temperature must be zero for greedy decoding")
+    if evaluation["decoding"].lower() != "greedy":
+        raise ConfigError("evaluation.decoding must be greedy")
+    if evaluation["primary_metric"] != "normalized_exact_match":
+        raise ConfigError(
+            "evaluation.primary_metric must be normalized_exact_match"
+        )
+    _require_positive_int(
+        _required(evaluation, "batch_size", "evaluation"),
+        "evaluation.batch_size",
+    )
+    evaluation_context = _require_positive_int(
+        _required(evaluation, "context_length", "evaluation"),
+        "evaluation.context_length",
+    )
+    if evaluation_context != model["context_length"]:
+        raise ConfigError("model and evaluation context lengths must match")
+    if (
+        _require_positive_int(
+            _required(evaluation, "max_new_tokens", "evaluation"),
+            "evaluation.max_new_tokens",
+        )
+        != 64
+    ):
+        raise ConfigError("evaluation.max_new_tokens must be 64")
 
     preflight_hops = _require_int_list(
         _required(preflight, "relational_hops", "preflight"),

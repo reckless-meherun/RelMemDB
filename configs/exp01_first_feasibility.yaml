@@ -50,7 +50,10 @@ training:
 evaluation:
   decoding: greedy
   temperature: 0.0
-  primary_metric: exact_match
+  primary_metric: normalized_exact_match
+  batch_size: 32
+  context_length: 256
+  max_new_tokens: 64
 
 preflight:
   relational_hops: [1, 2, 3]

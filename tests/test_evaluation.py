@@ -1,13 +1,37 @@
 from __future__ import annotations
 
-import json
 import hashlib
 import inspect
+import json
 import re
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from evaluation.inference import (
+    PROMPT_TEMPLATE,
+    QAArtifactError,
+    extract_first_nonempty_line,
+    format_question_prompt,
+    generate_prediction_records,
+    load_verified_qa_split,
+    prepare_result_directory,
+)
+from evaluation.metrics import (
+    compute_evaluation_metrics,
+    normalize_answer,
+)
+from evaluation.metrics import (
+    normalized_exact_match as closed_book_normalized_exact_match,
+)
+from evaluation.metrics import (
+    score_prediction as score_closed_book_prediction,
+)
+from evaluation.metrics import (
+    strict_exact_match as closed_book_strict_exact_match,
+)
 from training.relational_qa import (
     PREFLIGHT_NAMESPACE,
     PRIMITIVE_TRAIN_NAMESPACE,
@@ -16,7 +40,6 @@ from training.relational_qa import (
     SKILL_VALIDATION_NAMESPACE,
     answer_prefix_match,
     build_skill_example,
-    build_primitive_example,
     classify_candidate_prediction,
     curriculum_start_checkpoint,
     deterministic_json_bytes,
@@ -30,17 +53,18 @@ from training.relational_qa import (
     post_skill_decision,
     primitive_gate_decision,
     select_best_epoch,
+    step6c_decision,
     strict_exact_match,
     summarize_predictions,
-    step6c_decision,
     train_primitive_skill,
     train_relational_skill,
     validate_prompt_lengths,
-    visible_attribute_values,
     verify_skill_isolation,
     verify_step6c_isolation,
+    visible_attribute_values,
 )
-
+from utils.hashing import hash_file
+from utils.io import write_json, write_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL_DIR = PROJECT_ROOT / "models/base_models/gpt2"
@@ -606,3 +630,484 @@ def test_step6c_three_way_decision_logic() -> None:
         == "composition_skill_failure"
     )
     assert step6c_decision(ready_primitives, ready_relational) == "relational_skill_ready"
+
+
+class _FakeVector:
+    def __init__(self, values: list[int]) -> None:
+        self.values = values
+
+    def tolist(self) -> list[int]:
+        return list(self.values)
+
+
+class _FakeTensor:
+    def __init__(self, values: list[list[int]]) -> None:
+        self.values = values
+        self.shape = (len(values), len(values[0]) if values else 0)
+
+    def to(self, device: str):
+        del device
+        return self
+
+    def clone(self):
+        return _FakeTensor([list(row) for row in self.values])
+
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            row, column = key
+            values = self.values[row][column]
+            return _FakeVector(values if isinstance(values, list) else [values])
+        return _FakeVector(self.values[key])
+
+
+class _FakeTorch:
+    long = "long"
+
+    @staticmethod
+    def tensor(values, dtype=None):
+        del dtype
+        return _FakeTensor([list(row) for row in values])
+
+    @staticmethod
+    def cat(tensors, dim=0):
+        assert dim == 1
+        left, right = tensors
+        return _FakeTensor(
+            [
+                [*left_row, *right_row]
+                for left_row, right_row in zip(
+                    left.values, right.values, strict=True
+                )
+            ]
+        )
+
+    @staticmethod
+    @contextmanager
+    def inference_mode():
+        yield
+
+
+class _ClosedBookTokenizer:
+    eos_token = "<eos>"
+    eos_token_id = 0
+    name_or_path = "stub-tokenizer"
+
+    def __init__(self) -> None:
+        self.pad_token_id = None
+        self.padding_side = "right"
+        self.seen_prompts: list[str] = []
+        self.batch_calls: list[dict] = []
+
+    @property
+    def pad_token(self):
+        return self.eos_token if self.pad_token_id == self.eos_token_id else None
+
+    @pad_token.setter
+    def pad_token(self, value) -> None:
+        assert value == self.eos_token
+        self.pad_token_id = self.eos_token_id
+
+    @staticmethod
+    def _encode(text: str) -> list[int]:
+        return [ord(character) + 1 for character in text]
+
+    def __call__(
+        self,
+        text,
+        *,
+        add_special_tokens=False,
+        padding=False,
+        truncation=False,
+        return_tensors=None,
+    ):
+        assert add_special_tokens is False
+        assert truncation is False
+        if isinstance(text, str):
+            return {"input_ids": self._encode(text)}
+        self.seen_prompts.extend(text)
+        self.batch_calls.append(
+            {
+                "padding": padding,
+                "truncation": truncation,
+                "return_tensors": return_tensors,
+                "padding_side": self.padding_side,
+            }
+        )
+        encoded = [self._encode(value) for value in text]
+        width = max(map(len, encoded))
+        padded = [
+            [self.pad_token_id] * (width - len(ids)) + ids for ids in encoded
+        ]
+        masks = [
+            [0] * (width - len(ids)) + [1] * len(ids) for ids in encoded
+        ]
+        return {
+            "input_ids": _FakeTorch.tensor(padded, dtype=_FakeTorch.long),
+            "attention_mask": _FakeTorch.tensor(masks, dtype=_FakeTorch.long),
+        }
+
+    def decode(
+        self,
+        token_ids,
+        *,
+        skip_special_tokens,
+        clean_up_tokenization_spaces,
+    ) -> str:
+        assert skip_special_tokens is True
+        assert clean_up_tokenization_spaces is False
+        values = token_ids.tolist() if hasattr(token_ids, "tolist") else token_ids
+        return "".join(chr(value - 1) for value in values if value != 0)
+
+
+class _ClosedBookModel:
+    def __init__(self, continuations: list[str]) -> None:
+        self.continuations = list(continuations)
+        self.eval_called = False
+        self.generate_calls: list[dict] = []
+        self.config = SimpleNamespace(_name_or_path="stub-model")
+
+    def eval(self):
+        self.eval_called = True
+        return self
+
+    def generate(self, *, input_ids, attention_mask, **kwargs):
+        batch_size = input_ids.shape[0]
+        batch_continuations = [
+            self.continuations.pop(0) for _ in range(batch_size)
+        ]
+        encoded = [_ClosedBookTokenizer._encode(text) for text in batch_continuations]
+        width = max(map(len, encoded))
+        continuation_tensor = _FakeTorch.tensor(
+            [ids + [0] * (width - len(ids)) for ids in encoded],
+            dtype=_FakeTorch.long,
+        )
+        self.generate_calls.append(
+            {"attention_mask": attention_mask.clone(), **kwargs}
+        )
+        return _FakeTorch.cat((input_ids, continuation_tensor), dim=1)
+
+
+def _closed_book_record(
+    record_id: str,
+    hop: int,
+    gold_answer: str,
+    *,
+    fact_type: str | None = None,
+    support_fact_ids: list[str] | None = None,
+    target_field: str = "climate_band",
+) -> dict:
+    record = {
+        "id": record_id,
+        "split": "validation",
+        "hop": hop,
+        "question": f"Question for {record_id}?",
+        "gold_answer": gold_answer,
+        "source_entity_type": "country",
+        "target_entity_type": "continent",
+        "target_field": target_field,
+    }
+    if hop == 0:
+        record["fact_type"] = fact_type or "attribute"
+    else:
+        record["support_fact_ids"] = support_fact_ids or []
+    return record
+
+
+def test_closed_book_question_only_prompt_is_exact() -> None:
+    question = "What climate band does Eastern Oak Isles have?"
+    assert format_question_prompt(question) == (
+        "Question:\n"
+        "What climate band does Eastern Oak Isles have?\n\n"
+        "Answer:"
+    )
+    assert PROMPT_TEMPLATE == "Question:\n{question}\n\nAnswer:"
+
+
+def test_closed_book_inference_has_no_database_or_context_source() -> None:
+    import evaluation.inference as closed_book_inference
+
+    source = inspect.getsource(closed_book_inference)
+    for forbidden in (
+        "sqlite3",
+        "database.sqlite",
+        "book_readable",
+        "train.txt",
+        "master_world",
+    ):
+        assert forbidden not in source
+    loader_source = inspect.getsource(closed_book_inference.load_local_causal_lm)
+    assert "AutoTokenizer" in loader_source
+    assert "AutoModelForCausalLM" in loader_source
+    assert loader_source.count("local_files_only=True") == 2
+    assert 'model.to("cuda")' in loader_source
+    assert "use_deterministic_algorithms(True)" in loader_source
+
+
+def test_closed_book_batch_generation_is_question_only_and_continuation_only() -> None:
+    records = [
+        _closed_book_record("h0_a", 0, "Alpha"),
+        _closed_book_record("h0_b", 0, "Beta"),
+    ]
+    records[0]["context"] = "must never reach the prompt"
+    records[0]["support_fact_ids"] = ["private-support"]
+    tokenizer = _ClosedBookTokenizer()
+    model = _ClosedBookModel(["  Alpha\nexplanation", "Beta"])
+    predictions = generate_prediction_records(
+        records,
+        tokenizer=tokenizer,
+        model=model,
+        torch_module=_FakeTorch,
+        batch_size=2,
+        context_length=256,
+        device="cpu",
+    )
+    assert tokenizer.seen_prompts == [
+        format_question_prompt(records[0]["question"]),
+        format_question_prompt(records[1]["question"]),
+    ]
+    assert all("Alpha" not in prompt and "private-support" not in prompt for prompt in tokenizer.seen_prompts)
+    assert all("must never reach" not in prompt for prompt in tokenizer.seen_prompts)
+    assert tokenizer.padding_side == "left"
+    assert tokenizer.pad_token_id == tokenizer.eos_token_id
+    assert tokenizer.batch_calls == [
+        {
+            "padding": True,
+            "truncation": False,
+            "return_tensors": "pt",
+            "padding_side": "left",
+        }
+    ]
+    assert model.eval_called is True
+    assert model.generate_calls[0]["do_sample"] is False
+    assert model.generate_calls[0]["num_beams"] == 1
+    assert model.generate_calls[0]["max_new_tokens"] == 64
+    assert "temperature" not in model.generate_calls[0]
+    assert predictions[0]["raw_generation"] == "  Alpha\nexplanation"
+    assert predictions[0]["prediction"] == "Alpha"
+    assert predictions[0]["strict_exact_match"] is True
+    assert predictions[1]["raw_generation"] == "Beta"
+
+
+def test_closed_book_prompt_overflow_fails_without_truncation_or_generation() -> None:
+    tokenizer = _ClosedBookTokenizer()
+    model = _ClosedBookModel(["unused"])
+    with pytest.raises(ValueError, match="truncation is forbidden"):
+        generate_prediction_records(
+            [_closed_book_record("too_long", 0, "unused")],
+            tokenizer=tokenizer,
+            model=model,
+            torch_module=_FakeTorch,
+            batch_size=1,
+            context_length=2,
+            device="cpu",
+        )
+    assert model.generate_calls == []
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("  WARM   Temperate.  ", "warm temperate"),
+        ("A－B!", "a-b"),
+        ("1-3 million", "1-3 million"),
+        ("A, B", "a, b"),
+        ("answer...", "answer.."),
+    ],
+)
+def test_closed_book_conservative_normalization(value, expected) -> None:
+    assert normalize_answer(value) == expected
+
+
+def test_closed_book_strict_and_normalized_exact_match() -> None:
+    assert closed_book_strict_exact_match(" A- ", "A-") is True
+    assert closed_book_strict_exact_match("a-", "A-") is False
+    assert closed_book_strict_exact_match("A-.", "A-") is False
+    assert closed_book_normalized_exact_match(" WARM  Temperate!", "warm temperate")
+    assert not closed_book_normalized_exact_match("1–3 million", "1-3 million")
+    assert extract_first_nonempty_line(" \n  Answer A  \nsecond") == "Answer A"
+
+
+def _scored_record(
+    record_id: str,
+    hop: int,
+    gold: str,
+    prediction: str,
+    *,
+    fact_type: str | None = None,
+    supports: list[str] | None = None,
+    target_field: str = "climate_band",
+) -> dict:
+    qa_record = _closed_book_record(
+        record_id,
+        hop,
+        gold,
+        fact_type=fact_type,
+        support_fact_ids=supports,
+        target_field=target_field,
+    )
+    return score_closed_book_prediction(qa_record, prediction, prediction)
+
+
+def test_closed_book_metric_aggregation_baselines_and_conditional_accuracy() -> None:
+    records = [
+        _scored_record("a", 0, "Cold", "cold.", fact_type="attribute"),
+        _scored_record(
+            "b",
+            0,
+            "Eastern Isles",
+            "Eastern Isles",
+            fact_type="relation",
+            target_field="continent_name",
+        ),
+        _scored_record("c", 0, "Warm", "wrong", fact_type="attribute"),
+        _scored_record("d", 0, "Cold", "Cold", fact_type="attribute"),
+        _scored_record("h1_good", 1, "Cold", "cold", supports=["a", "b"]),
+        _scored_record("h1_ineligible", 1, "Warm", "Warm", supports=["c", "b"]),
+        _scored_record("h2", 2, "Cold", "Cold", supports=["a", "b", "c"]),
+        _scored_record(
+            "h3",
+            3,
+            "Cold",
+            "wrong",
+            supports=["a", "b", "d", "a"],
+        ),
+    ]
+    metrics = compute_evaluation_metrics(records)
+    assert metrics["primary_metric"] == "normalized_exact_match"
+    assert metrics["overall"]["count"] == 8
+    assert metrics["overall"]["normalized_exact_match_correct"] == 6
+    assert metrics["by_hop"]["H0"]["normalized_exact_match_accuracy"] == 0.75
+    assert metrics["by_hop"]["H1"]["normalized_exact_match_accuracy"] == 1.0
+    assert metrics["h0_by_fact_type"]["attribute"]["count"] == 3
+    assert metrics["h0_by_fact_type"]["relation"]["count"] == 1
+    assert "climate_band" in metrics["by_target_field"]
+    assert metrics["target_field_macro_average"][
+        "normalized_exact_match_accuracy"
+    ] == pytest.approx((5 / 7 + 1.0) / 2)
+    baseline = metrics["majority_gold_answer_baseline"]
+    assert baseline["by_target_field"]["climate_band"][
+        "majority_gold_answer"
+    ] == "Cold"
+    assert baseline["by_target_field"]["climate_band"]["accuracy"] == pytest.approx(5 / 7)
+    conditional = metrics["conditional_relational_accuracy"]
+    assert conditional["H1"] == {
+        "total_count": 2,
+        "support_correct_count": 1,
+        "eligible_count": 1,
+        "support_recall_rate": 0.5,
+        "conditional_correct_count": 1,
+        "conditional_accuracy": 1.0,
+    }
+    assert conditional["H2"]["eligible_count"] == 0
+    assert conditional["H2"]["conditional_accuracy"] is None
+    assert conditional["H3"]["eligible_count"] == 1
+    assert conditional["H3"]["conditional_accuracy"] == 0.0
+
+
+def _write_closed_book_qa_fixture(root: Path) -> Path:
+    split_dir = root / "validation"
+    records = {
+        "H0": [
+            _closed_book_record(f"h0_{index}", 0, f"answer {index}")
+            for index in range(4)
+        ],
+        "H1": [
+            _closed_book_record(
+                "h1_0", 1, "answer 0", support_fact_ids=["h0_0", "h0_1"]
+            )
+        ],
+        "H2": [
+            _closed_book_record(
+                "h2_0",
+                2,
+                "answer 0",
+                support_fact_ids=["h0_0", "h0_1", "h0_2"],
+            )
+        ],
+        "H3": [
+            _closed_book_record(
+                "h3_0",
+                3,
+                "answer 0",
+                support_fact_ids=["h0_0", "h0_1", "h0_2", "h0_3"],
+            )
+        ],
+    }
+    paths = {}
+    for hop_name, hop_records in records.items():
+        path = split_dir / f"{hop_name}.jsonl"
+        write_jsonl(path, hop_records)
+        paths[hop_name] = path
+    manifest = {
+        "T": 12,
+        "requested_N": 10_000,
+        "split": "validation",
+        "zero_context": True,
+        "counts": {
+            hop_name: {"final_retained_count": len(hop_records)}
+            for hop_name, hop_records in records.items()
+        },
+        "final_retained_total": sum(map(len, records.values())),
+        "output_file_hashes": {
+            path.name: hash_file(path) for path in paths.values()
+        },
+    }
+    manifest_path = split_dir / "manifest.json"
+    write_json(manifest_path, manifest)
+    write_json(
+        root / "split_manifest.json",
+        {
+            "T": 12,
+            "requested_N": 10_000,
+            "zero_context": True,
+            "validation_manifest_sha256": hash_file(manifest_path),
+        },
+    )
+    return split_dir
+
+
+def test_closed_book_manifest_hash_count_and_support_verification(tmp_path) -> None:
+    split_dir = _write_closed_book_qa_fixture(tmp_path / "qa")
+    records, provenance = load_verified_qa_split(
+        split_dir,
+        split="validation",
+        expected_table_count=12,
+        expected_fact_count=10_000,
+    )
+    assert [record["hop"] for record in records] == [0, 0, 0, 0, 1, 2, 3]
+    assert set(provenance["input_hashes"]) == {"H0", "H1", "H2", "H3"}
+    with (split_dir / "H1.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write("{}\n")
+    with pytest.raises(QAArtifactError, match="H1 hash"):
+        load_verified_qa_split(
+            split_dir,
+            split="validation",
+            expected_table_count=12,
+            expected_fact_count=10_000,
+        )
+
+
+def test_closed_book_generation_is_deterministic_with_stubs() -> None:
+    records = [_closed_book_record("h0_a", 0, "Alpha")]
+
+    def run_once():
+        return generate_prediction_records(
+            records,
+            tokenizer=_ClosedBookTokenizer(),
+            model=_ClosedBookModel(["Alpha"]),
+            torch_module=_FakeTorch,
+            batch_size=1,
+            context_length=256,
+            device="cpu",
+        )
+
+    assert run_once() == run_once()
+
+
+def test_closed_book_safe_output_directory_handling(tmp_path) -> None:
+    output_dir = tmp_path / "result"
+    assert prepare_result_directory(output_dir) == output_dir
+    assert prepare_result_directory(output_dir) == output_dir
+    (output_dir / "metrics.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        prepare_result_directory(output_dir)

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,30 @@ def qa_condition_dir(table_count: int, fact_count: int) -> Path:
     if table_count == 8:
         return n_sweep_qa_dir(fact_count)
     raise ValueError("non-N10K QA conditions must use the n_sweep_T8 architecture")
+
+
+def evaluation_result_dir(
+    table_count: int, fact_count: int, split: str, run_name: str
+) -> Path:
+    table_count = _positive_int(table_count, "table_count")
+    fact_count = _positive_int(fact_count, "fact_count")
+    if split not in {"validation", "test"}:
+        raise ValueError("split must be validation or test")
+    if not isinstance(run_name, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*", run_name
+    ):
+        raise ValueError("run_name must be a filesystem-safe name")
+    if fact_count == 10_000:
+        condition_dir = EXP01_RESULTS_DIR / "t_sweep_N10K" / f"T{table_count}"
+    elif table_count == 8:
+        condition_dir = (
+            EXP01_RESULTS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
+        )
+    else:
+        raise ValueError(
+            "non-N10K evaluation conditions must use the n_sweep_T8 architecture"
+        )
+    return condition_dir / split / run_name
 
 
 def ensure_dir(path: str | Path) -> Path:
