@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
+from experiment import verify_checkpoint_layers
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
 
@@ -48,9 +49,7 @@ def verify_cpt_artifacts(
     database_manifest_path = _require_nonempty_file(
         database_manifest_path, "database manifest"
     )
-    readable_book_path = _require_nonempty_file(
-        readable_book_path, "CPT readable book"
-    )
+    readable_book_path = _require_nonempty_file(readable_book_path, "CPT readable book")
     train_text_path = _require_nonempty_file(train_text_path, "CPT train text")
     cpt_manifest_path = _require_nonempty_file(cpt_manifest_path, "CPT manifest")
 
@@ -68,12 +67,17 @@ def verify_cpt_artifacts(
         (database_manifest, "database manifest"),
         (cpt_manifest, "CPT manifest"),
     ):
-        if manifest.get("T") != table_count or manifest.get("table_count") != table_count:
+        if (
+            manifest.get("T") != table_count
+            or manifest.get("table_count") != table_count
+        ):
             raise CPTArtifactError(f"{label} T metadata does not match T={table_count}")
         if manifest.get("requested_N") != fact_count:
             raise CPTArtifactError(f"{label} N metadata does not match N={fact_count}")
     if database_manifest.get("actual_logical_fact_count") != fact_count:
-        raise CPTArtifactError("database manifest actual logical fact count is inconsistent")
+        raise CPTArtifactError(
+            "database manifest actual logical fact count is inconsistent"
+        )
     if cpt_manifest.get("format_version") != SERIALIZATION_FORMAT_VERSION:
         raise CPTArtifactError("CPT serialization format version is unsupported")
     if cpt_manifest.get("serialization_style") != SERIALIZATION_STYLE:
@@ -83,14 +87,15 @@ def verify_cpt_artifacts(
     if cpt_manifest.get("fact_exposure") != fact_exposure:
         raise CPTArtifactError("CPT fact exposure does not match the experiment config")
     if cpt_manifest.get("readable_book_copy_count_in_train_text") != fact_exposure:
-        raise CPTArtifactError("CPT readable-book copy count does not match fact exposure")
+        raise CPTArtifactError(
+            "CPT readable-book copy count does not match fact exposure"
+        )
     if cpt_manifest.get("source_database_sha256") != database_sha256:
         raise CPTArtifactError("CPT manifest source database hash is inconsistent")
-    if (
-        cpt_manifest.get("source_database_manifest_sha256")
-        != database_manifest_sha256
-    ):
-        raise CPTArtifactError("CPT manifest source database-manifest hash is inconsistent")
+    if cpt_manifest.get("source_database_manifest_sha256") != database_manifest_sha256:
+        raise CPTArtifactError(
+            "CPT manifest source database-manifest hash is inconsistent"
+        )
     if cpt_manifest.get("train_text_sha256") != train_text_sha256:
         raise CPTArtifactError("CPT train-text hash does not match its manifest")
     if cpt_manifest.get("readable_book_sha256") != readable_book_sha256:
@@ -108,7 +113,9 @@ def verify_cpt_artifacts(
         readable_book = readable_book_bytes.decode("utf-8")
         train_text = train_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise CPTArtifactError("CPT readable book or train text is not valid UTF-8") from exc
+        raise CPTArtifactError(
+            "CPT readable book or train text is not valid UTF-8"
+        ) from exc
     expected_statistics = {
         "readable_book_byte_count": len(readable_book_bytes),
         "readable_book_character_count": len(readable_book),
@@ -147,11 +154,18 @@ def chunk_token_ids(
 ) -> tuple[list[dict[str, list[int] | int]], dict[str, int]]:
     if not token_ids:
         raise ValueError("the CPT corpus tokenization is empty")
-    if isinstance(context_length, bool) or not isinstance(context_length, int) or context_length <= 0:
+    if (
+        isinstance(context_length, bool)
+        or not isinstance(context_length, int)
+        or context_length <= 0
+    ):
         raise ValueError("context_length must be a positive integer")
     if isinstance(pad_token_id, bool) or not isinstance(pad_token_id, int):
         raise ValueError("pad_token_id must be an integer")
-    if not all(isinstance(token_id, int) and not isinstance(token_id, bool) for token_id in token_ids):
+    if not all(
+        isinstance(token_id, int) and not isinstance(token_id, bool)
+        for token_id in token_ids
+    ):
         raise ValueError("token_ids must contain only integers")
 
     examples: list[dict[str, list[int] | int]] = []
@@ -232,7 +246,12 @@ def enable_full_parameter_training(model: Any) -> dict[str, int]:
 
 
 def build_cpt_training_plan(
-    config: dict[str, Any], *, table_count: int, fact_count: int, sequence_count: int
+    config: dict[str, Any],
+    *,
+    table_count: int,
+    fact_count: int,
+    sequence_count: int,
+    layers: int | None = None,
 ) -> dict[str, Any]:
     training = config["training"]
     if (
@@ -265,9 +284,7 @@ def build_cpt_training_plan(
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"training.{key} must be a number")
         numeric_value = float(value)
-        if positive and (
-            numeric_value < 0 or (numeric_value == 0 and not allow_zero)
-        ):
+        if positive and (numeric_value < 0 or (numeric_value == 0 and not allow_zero)):
             qualifier = "non-negative" if allow_zero else "positive"
             raise ValueError(f"training.{key} must be {qualifier}")
         return numeric_value
@@ -337,15 +354,14 @@ def build_cpt_training_plan(
             "training.drop_last would discard every CPT sequence; reduce "
             "training.cpt_batch_size or disable drop_last"
         )
-    steps_per_epoch = math.ceil(
-        micro_batches_per_epoch / gradient_accumulation_steps
-    )
+    steps_per_epoch = math.ceil(micro_batches_per_epoch / gradient_accumulation_steps)
     optimizer_steps = steps_per_epoch * epochs
     warmup_steps = math.ceil(optimizer_steps * warmup_ratio)
     return {
         "stage": "cpt",
         "T": table_count,
         "N": fact_count,
+        "L": config["model"]["layers"] if layers is None else layers,
         "seed": seed,
         "epochs": epochs,
         "passes_over_serialized_corpus": epochs,
@@ -384,9 +400,7 @@ def build_cpt_training_plan(
     }
 
 
-def _iterate_cpt_batches(
-    loader: Any, epochs: int
-) -> Iterator[tuple[int, int, Any]]:
+def _iterate_cpt_batches(loader: Any, epochs: int) -> Iterator[tuple[int, int, Any]]:
     for epoch in range(1, epochs + 1):
         for step_in_epoch, batch in enumerate(loader, start=1):
             yield epoch, step_in_epoch, batch
@@ -435,9 +449,7 @@ def _configure_gradient_checkpointing(model: Any, enabled: bool) -> None:
         return
     if getattr(model, "is_gradient_checkpointing", False):
         if not hasattr(model, "gradient_checkpointing_disable"):
-            raise RuntimeError(
-                "the source model cannot disable gradient checkpointing"
-            )
+            raise RuntimeError("the source model cannot disable gradient checkpointing")
         model.gradient_checkpointing_disable()
 
 
@@ -470,6 +482,7 @@ def run_cpt_training(
     *,
     table_count: int,
     fact_count: int,
+    layers: int | None = None,
     source_checkpoint: str | Path,
     output_checkpoint: str | Path,
     run_config_path: str | Path,
@@ -484,10 +497,13 @@ def run_cpt_training(
     output_checkpoint = Path(output_checkpoint)
     run_config_path = Path(run_config_path)
     train_log_path = Path(train_log_path)
-    if not source_checkpoint.is_dir() or not (
-        source_checkpoint / "config.json"
-    ).is_file():
+    if (
+        not source_checkpoint.is_dir()
+        or not (source_checkpoint / "config.json").is_file()
+    ):
         raise FileNotFoundError(f"source checkpoint is missing: {source_checkpoint}")
+    requested_layers = config["model"]["layers"] if layers is None else layers
+    layer_provenance = verify_checkpoint_layers(source_checkpoint, requested_layers)
     if source_checkpoint.resolve() == output_checkpoint.resolve():
         raise ValueError("source and final CPT checkpoint paths must differ")
     if output_checkpoint.exists():
@@ -519,6 +535,7 @@ def run_cpt_training(
         table_count=table_count,
         fact_count=fact_count,
         sequence_count=token_statistics["sequence_count"],
+        layers=requested_layers,
     )
     model_context_limit = getattr(model.config, "max_position_embeddings", None)
     if model_context_limit is None:
@@ -591,11 +608,18 @@ def run_cpt_training(
     )
     run_record = {
         "experiment": config["experiment"]["name"],
+        "T": table_count,
+        "N": fact_count,
+        "L": requested_layers,
+        "experiment_condition": {
+            "table_count": table_count,
+            "fact_count": fact_count,
+            "layers": requested_layers,
+        },
         "source_checkpoint": str(source_checkpoint),
         "final_checkpoint_path": str(output_checkpoint),
-        "source_checkpoint_config_sha256": hash_file(
-            source_checkpoint / "config.json"
-        ),
+        "source_checkpoint_config_sha256": hash_file(source_checkpoint / "config.json"),
+        "checkpoint_layer_verification": layer_provenance,
         "tokenizer_identity": getattr(
             tokenizer, "name_or_path", tokenizer.__class__.__name__
         ),
@@ -627,9 +651,7 @@ def run_cpt_training(
     accumulation_weighted_loss = 0.0
     accumulation_loss_tokens = 0
     accumulation_steps = plan["gradient_accumulation_steps"]
-    final_accumulation_remainder = (
-        plan["micro_batches_per_epoch"] % accumulation_steps
-    )
+    final_accumulation_remainder = plan["micro_batches_per_epoch"] % accumulation_steps
     autocast_dtype = {
         "bf16": torch.bfloat16,
         "fp16": torch.float16,
@@ -640,14 +662,11 @@ def run_cpt_training(
         loader, plan["epochs"]
     ):
         batch = {
-            key: value.to(device, non_blocking=True)
-            for key, value in batch.items()
+            key: value.to(device, non_blocking=True) for key, value in batch.items()
         }
         supervised_tokens = int((batch["labels"] != -100).sum().item())
         observed_supervised_tokens += supervised_tokens
-        is_final_micro_batch = (
-            micro_batch_in_epoch == plan["micro_batches_per_epoch"]
-        )
+        is_final_micro_batch = micro_batch_in_epoch == plan["micro_batches_per_epoch"]
         in_final_partial_accumulation = (
             final_accumulation_remainder > 0
             and micro_batch_in_epoch
@@ -677,8 +696,7 @@ def run_cpt_training(
         accumulation_weighted_loss += detached_loss * contributing_tokens
         accumulation_loss_tokens += contributing_tokens
         should_step = (
-            micro_batch_in_epoch % accumulation_steps == 0
-            or is_final_micro_batch
+            micro_batch_in_epoch % accumulation_steps == 0 or is_final_micro_batch
         )
         if not should_step:
             continue
@@ -697,9 +715,7 @@ def run_cpt_training(
                 "record_type": "optimizer_step",
                 "step": optimizer_step,
                 "epoch": epoch,
-                "step_in_epoch": math.ceil(
-                    micro_batch_in_epoch / accumulation_steps
-                ),
+                "step_in_epoch": math.ceil(micro_batch_in_epoch / accumulation_steps),
                 "last_micro_batch_in_epoch": micro_batch_in_epoch,
                 "accumulated_micro_batches": accumulation_micro_batches,
                 "loss": accumulation_weighted_loss / accumulation_loss_tokens,
@@ -715,9 +731,7 @@ def run_cpt_training(
 
     if len(step_records) != plan["optimizer_steps"]:
         raise RuntimeError("CPT optimizer-step accounting is inconsistent")
-    expected_supervised_tokens = (
-        token_statistics["supervised_tokens"] * plan["epochs"]
-    )
+    expected_supervised_tokens = token_statistics["supervised_tokens"] * plan["epochs"]
     if (
         not plan["drop_last"]
         and observed_supervised_tokens != expected_supervised_tokens

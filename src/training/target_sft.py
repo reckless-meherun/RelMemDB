@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from data.qa import RAW_ENTITY_IDENTIFIER, answer_is_in_question, normalize_for_leakage
+from data.qa_reference import verify_qa_reference_compatibility
 from evaluation.inference import (
     HOP_NAMES,
     PROMPT_TEMPLATE,
@@ -17,10 +18,11 @@ from evaluation.inference import (
     generate_prediction_records,
 )
 from evaluation.metrics import compute_evaluation_metrics
+from experiment import qa_reference_values, verify_checkpoint_layers
 from training.cpt import enable_full_parameter_training
 from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json, read_jsonl, write_json, write_jsonl, write_yaml
-from utils.paths import database_condition_dir
+from utils.paths import database_condition_dir, qa_reference_dir
 
 TARGET_SFT_DATASET_DIR = "target_sft"
 TARGET_SFT_TRAIN_SPLIT = "train"
@@ -61,9 +63,7 @@ def _is_sha256(value: Any) -> bool:
     )
 
 
-def _require_zero_overlap_audit(
-    split_manifest: dict[str, Any], field: str
-) -> None:
+def _require_zero_overlap_audit(split_manifest: dict[str, Any], field: str) -> None:
     audit = split_manifest.get(field)
     if not isinstance(audit, dict) or not REQUIRED_CROSS_PARTITION_PAIRS <= set(audit):
         raise ValueError(f"target-SFT {field} is missing required partition pairs")
@@ -73,7 +73,9 @@ def _require_zero_overlap_audit(
         if isinstance(count, bool) or not isinstance(count, int) or count != 0
     }
     if invalid:
-        raise ValueError(f"target-SFT {field} must contain only zero overlaps: {invalid}")
+        raise ValueError(
+            f"target-SFT {field} must contain only zero overlaps: {invalid}"
+        )
 
 
 def _validate_target_sft_record(
@@ -125,7 +127,9 @@ def _load_authenticated_target_sft_split(
     )
     manifest_sha256 = hash_file(manifest_path)
     if manifest_sha256 != split_manifest.get(f"{split}_manifest_sha256"):
-        raise ValueError(f"target-SFT {split} manifest hash does not match split manifest")
+        raise ValueError(
+            f"target-SFT {split} manifest hash does not match split manifest"
+        )
     manifest = read_json(manifest_path)
     expected_chain_indices = split_manifest.get(f"{split}_chain_indices")
     expected_metadata = {
@@ -276,7 +280,10 @@ def load_target_sft_dataset(
         expected_hash = split_manifest.get(f"{split}_chain_indices_sha256")
         if expected_hash != hash_json_object(indices):
             raise ValueError(f"target-SFT {split} chain assignment hash is invalid")
-        if split_manifest.get("chain_assignment_hashes", {}).get(split) != expected_hash:
+        if (
+            split_manifest.get("chain_assignment_hashes", {}).get(split)
+            != expected_hash
+        ):
             raise ValueError(f"target-SFT {split} recorded assignment hash is invalid")
     assignments = {
         "train": split_manifest["train_chain_indices"],
@@ -328,9 +335,10 @@ def load_target_sft_dataset(
     database_manifest = read_json(database_manifest_path)
     if database_manifest.get("database_sha256") != database_sha256:
         raise ValueError("target-SFT database does not match its database manifest")
-    if database_manifest.get("T") != table_count or database_manifest.get(
-        "requested_N"
-    ) != fact_count:
+    if (
+        database_manifest.get("T") != table_count
+        or database_manifest.get("requested_N") != fact_count
+    ):
         raise ValueError("target-SFT source database condition is inconsistent")
 
     train_records, train_provenance = _load_authenticated_target_sft_split(
@@ -389,21 +397,25 @@ def load_target_sft_dataset(
                     raise ValueError(
                         f"canonical target-SFT {split} {key} is inconsistent"
                     )
-    return train_records, dev_records, {
-        "dataset_path": str(dataset_path),
-        "training_split": training_split,
-        "dev_split": dev_split,
-        "target_sft_split_manifest_sha256": split_manifest_sha256,
-        "train_manifest_sha256": train_provenance["manifest_sha256"],
-        "dev_manifest_sha256": dev_provenance["manifest_sha256"],
-        "source_database_sha256": database_sha256,
-        "source_database_manifest_sha256": database_manifest_sha256,
-        "train": train_provenance,
-        "dev": dev_provenance,
-        "zero_context": True,
-        "validation_split_used": False,
-        "test_split_used": False,
-    }
+    return (
+        train_records,
+        dev_records,
+        {
+            "dataset_path": str(dataset_path),
+            "training_split": training_split,
+            "dev_split": dev_split,
+            "target_sft_split_manifest_sha256": split_manifest_sha256,
+            "train_manifest_sha256": train_provenance["manifest_sha256"],
+            "dev_manifest_sha256": dev_provenance["manifest_sha256"],
+            "source_database_sha256": database_sha256,
+            "source_database_manifest_sha256": database_manifest_sha256,
+            "train": train_provenance,
+            "dev": dev_provenance,
+            "zero_context": True,
+            "validation_split_used": False,
+            "test_split_used": False,
+        },
+    )
 
 
 def encode_target_sft_example(
@@ -481,6 +493,7 @@ def build_target_sft_training_plan(
     table_count: int,
     fact_count: int,
     example_count: int,
+    layers: int | None = None,
 ) -> dict[str, Any]:
     """Validate target-SFT settings and calculate exact update accounting."""
     settings = config.get("target_sft")
@@ -568,7 +581,9 @@ def build_target_sft_training_plan(
     answer_only_loss = boolean("answer_only_loss")
     supervise_eos = boolean("supervise_eos")
     if drop_last:
-        raise ValueError("target_sft.drop_last must be false to train on all QA records")
+        raise ValueError(
+            "target_sft.drop_last must be false to train on all QA records"
+        )
     if not answer_only_loss or not supervise_eos:
         raise ValueError("target SFT requires answer-only loss and supervised EOS")
     seed = config.get("experiment", {}).get("seed")
@@ -576,15 +591,14 @@ def build_target_sft_training_plan(
         raise ValueError("experiment.seed must be a non-negative integer")
 
     microbatches_per_epoch = math.ceil(example_count / batch_size)
-    optimizer_steps_per_epoch = math.ceil(
-        microbatches_per_epoch / accumulation_steps
-    )
+    optimizer_steps_per_epoch = math.ceil(microbatches_per_epoch / accumulation_steps)
     total_optimizer_steps = optimizer_steps_per_epoch * epochs
     warmup_steps = math.ceil(total_optimizer_steps * warmup_ratio)
     return {
         "stage": "target-sft",
         "T": table_count,
         "N": fact_count,
+        "L": config["model"]["layers"] if layers is None else layers,
         "dataset_dir": TARGET_SFT_DATASET_DIR,
         "training_split": TARGET_SFT_TRAIN_SPLIT,
         "dev_split": TARGET_SFT_DEV_SPLIT,
@@ -729,9 +743,7 @@ def summarize_target_sft_dev_metrics(
 
     return {
         "dev_answer_only_loss": float(dev_answer_only_loss),
-        "dev_overall_normalized_exact_match": normalized_accuracy(
-            metrics["overall"]
-        ),
+        "dev_overall_normalized_exact_match": normalized_accuracy(metrics["overall"]),
         **{
             f"dev_{hop}_normalized_exact_match": normalized_accuracy(
                 metrics["by_hop"][hop]
@@ -751,6 +763,7 @@ def target_sft_epoch_is_better(
     candidate: dict[str, Any], incumbent: dict[str, Any] | None
 ) -> bool:
     """Compare epochs by dev EM, then dev loss, then earlier epoch."""
+
     def selection_key(record: dict[str, Any]) -> tuple[float, float, int]:
         epoch = record.get("epoch")
         em = record.get("dev_overall_normalized_exact_match")
@@ -822,8 +835,7 @@ def evaluate_target_sft_dev(
     with torch_module.inference_mode():
         for batch in dev_loader:
             batch = {
-                key: value.to(device, non_blocking=True)
-                for key, value in batch.items()
+                key: value.to(device, non_blocking=True) for key, value in batch.items()
             }
             with torch_module.autocast(device_type="cuda", dtype=torch_module.bfloat16):
                 output = model(**batch)
@@ -878,6 +890,7 @@ def run_target_sft_training(
     *,
     table_count: int,
     fact_count: int,
+    layers: int | None = None,
     source_checkpoint: str | Path,
     output_checkpoint: str | Path,
     run_config_path: str | Path,
@@ -889,10 +902,13 @@ def run_target_sft_training(
     output_checkpoint = Path(output_checkpoint)
     run_config_path = Path(run_config_path)
     train_log_path = Path(train_log_path)
-    if not source_checkpoint.is_dir() or not (
-        source_checkpoint / "config.json"
-    ).is_file():
+    if (
+        not source_checkpoint.is_dir()
+        or not (source_checkpoint / "config.json").is_file()
+    ):
         raise FileNotFoundError(f"source checkpoint is missing: {source_checkpoint}")
+    requested_layers = config["model"]["layers"] if layers is None else layers
+    layer_provenance = verify_checkpoint_layers(source_checkpoint, requested_layers)
     ensure_target_sft_outputs_available(
         source_checkpoint=source_checkpoint,
         output_checkpoint=output_checkpoint,
@@ -900,19 +916,29 @@ def run_target_sft_training(
         train_log_path=train_log_path,
     )
     settings = config.get("target_sft", {})
+    configured_reference_dir = qa_reference_dir(config)
+    if Path(qa_condition_dir).resolve() != configured_reference_dir.resolve():
+        raise ValueError(
+            "target SFT must use the configured immutable data.qa_reference directory"
+        )
+    reference_table_count, reference_fact_count = qa_reference_values(config)
     train_records, dev_records, provenance = load_target_sft_dataset(
         qa_condition_dir,
         dataset_dir=settings.get("dataset_dir"),
         training_split=settings.get("training_split"),
         dev_split=settings.get("dev_split"),
-        table_count=table_count,
-        fact_count=fact_count,
+        table_count=reference_table_count,
+        fact_count=reference_fact_count,
+    )
+    compatibility = verify_qa_reference_compatibility(
+        config, table_count, fact_count, reference_dir=qa_condition_dir
     )
     plan = build_target_sft_training_plan(
         config,
         table_count=table_count,
         fact_count=fact_count,
         example_count=len(train_records),
+        layers=requested_layers,
     )
     started = time.perf_counter()
     model, tokenizer = _load_local_model_and_tokenizer(source_checkpoint)
@@ -966,9 +992,7 @@ def run_target_sft_training(
     model.config.use_cache = False
     configure_gradient_checkpointing(model, plan["gradient_checkpointing"])
     parameter_counts = enable_full_parameter_training(model)
-    generator = (
-        seeded_dataloader_generator(torch, seed) if plan["shuffle"] else None
-    )
+    generator = seeded_dataloader_generator(torch, seed) if plan["shuffle"] else None
     train_loader = DataLoader(
         train_examples,
         batch_size=plan["batch_size"],
@@ -1012,11 +1036,19 @@ def run_target_sft_training(
         "experiment": config["experiment"]["name"],
         "T": table_count,
         "N": fact_count,
+        "L": requested_layers,
+        "current_database_condition": {
+            **compatibility["current_database_condition"],
+            "layers": requested_layers,
+        },
+        "qa_reference": compatibility["qa_reference"],
+        "semantic_compatibility_fingerprint": compatibility[
+            "semantic_compatibility_fingerprint"
+        ],
         "source_checkpoint": str(source_checkpoint),
         "output_checkpoint": str(output_checkpoint),
-        "source_checkpoint_config_sha256": hash_file(
-            source_checkpoint / "config.json"
-        ),
+        "source_checkpoint_config_sha256": hash_file(source_checkpoint / "config.json"),
+        "checkpoint_layer_verification": layer_provenance,
         "sft_dataset_path": provenance["dataset_path"],
         "qa_training_split": TARGET_SFT_TRAIN_SPLIT,
         "qa_dev_split": TARGET_SFT_DEV_SPLIT,
@@ -1051,9 +1083,7 @@ def run_target_sft_training(
         "effective_batch_size": plan["effective_batch_size"],
         "optimizer": plan["optimizer"],
         "fused_optimizer_requested": plan["fused_optimizer_requested"],
-        "fused_optimizer_actually_used": plan[
-            "fused_optimizer_actually_used"
-        ],
+        "fused_optimizer_actually_used": plan["fused_optimizer_actually_used"],
         "learning_rate": plan["learning_rate"],
         "weight_decay": plan["weight_decay"],
         "scheduler": plan["scheduler"],
@@ -1078,9 +1108,7 @@ def run_target_sft_training(
     }
     write_yaml(run_config_path, run_record)
 
-    log_records: list[dict[str, Any]] = [
-        {"record_type": "configuration", **run_record}
-    ]
+    log_records: list[dict[str, Any]] = [{"record_type": "configuration", **run_record}]
     optimizer.zero_grad(set_to_none=True)
     total_weighted_loss = 0.0
     total_loss_tokens = 0
@@ -1102,14 +1130,11 @@ def run_target_sft_training(
             epoch_examples += batch_size
             observed_examples += batch_size
             batch = {
-                key: value.to(device, non_blocking=True)
-                for key, value in batch.items()
+                key: value.to(device, non_blocking=True) for key, value in batch.items()
             }
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = model(**batch)
-                contributing_tokens = int(
-                    (batch["labels"][:, 1:] != -100).sum().item()
-                )
+                contributing_tokens = int((batch["labels"][:, 1:] != -100).sum().item())
                 if contributing_tokens <= 0:
                     raise RuntimeError("target-SFT batch has no supervised LM tokens")
                 summed_loss = output.loss * contributing_tokens
@@ -1153,9 +1178,13 @@ def run_target_sft_training(
         if accumulated_loss_tokens != 0:
             raise RuntimeError("target-SFT partial accumulation was not stepped")
         if epoch_examples != len(train_records):
-            raise RuntimeError("target SFT did not consume every QA example in an epoch")
+            raise RuntimeError(
+                "target SFT did not consume every QA example in an epoch"
+            )
         if epoch_optimizer_steps != plan["optimizer_steps_per_epoch"]:
-            raise RuntimeError("target-SFT per-epoch optimizer-step count is inconsistent")
+            raise RuntimeError(
+                "target-SFT per-epoch optimizer-step count is inconsistent"
+            )
         epoch_record = {
             "record_type": "epoch",
             "epoch": epoch,
@@ -1186,9 +1215,7 @@ def run_target_sft_training(
         ) = update_target_sft_selection(
             epoch_record,
             incumbent=best_epoch_record,
-            completed_epochs_without_improvement=(
-                completed_epochs_without_improvement
-            ),
+            completed_epochs_without_improvement=(completed_epochs_without_improvement),
             patience=plan["early_stopping_patience"],
         )
         epoch_record["improved_best_checkpoint"] = improved
@@ -1210,11 +1237,15 @@ def run_target_sft_training(
     completed_epochs = len(epoch_records)
     expected_actual_steps = plan["optimizer_steps_per_epoch"] * completed_epochs
     if optimizer_step != expected_actual_steps:
-        raise RuntimeError("target-SFT actual optimizer-step accounting is inconsistent")
+        raise RuntimeError(
+            "target-SFT actual optimizer-step accounting is inconsistent"
+        )
     if optimizer_step > plan["maximum_optimizer_steps"]:
         raise RuntimeError("target-SFT exceeded its maximum optimizer-step count")
     if observed_examples != len(train_records) * completed_epochs:
-        raise RuntimeError("target SFT did not use every example exactly once per epoch")
+        raise RuntimeError(
+            "target SFT did not use every example exactly once per epoch"
+        )
     if best_epoch_record is None:
         raise RuntimeError("target-SFT model selection did not select a checkpoint")
     for epoch_record in epoch_records:
@@ -1251,13 +1282,9 @@ def run_target_sft_training(
             "dev_overall_normalized_exact_match"
         ],
         "best_dev_answer_only_loss": best_epoch_record["dev_answer_only_loss"],
-        "completed_epochs_without_improvement": (
-            completed_epochs_without_improvement
-        ),
+        "completed_epochs_without_improvement": (completed_epochs_without_improvement),
         "runtime_seconds": time.perf_counter() - started,
-        "peak_allocated_gpu_memory_bytes": int(
-            torch.cuda.max_memory_allocated(device)
-        ),
+        "peak_allocated_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
         "validation_split_used": False,
         "test_split_used": False,
     }

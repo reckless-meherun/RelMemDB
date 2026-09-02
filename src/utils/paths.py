@@ -53,8 +53,10 @@ def database_condition_dir(table_count: int, fact_count: int) -> Path:
         return t_sweep_database_dir(table_count)
     if table_count == 8:
         return n_sweep_database_dir(fact_count)
-    raise ValueError(
-        "non-N10K database conditions must use the n_sweep_T8 architecture"
+    return (
+        EXP01_GENERATED_DATABASES_DIR
+        / "conditions"
+        / f"T{table_count}_{_fact_count_label(fact_count)}"
     )
 
 
@@ -62,39 +64,29 @@ def cpt_database_dir(table_count: int, fact_count: int) -> Path:
     return database_condition_dir(table_count, fact_count) / "cpt"
 
 
-def cpt_run_dir(table_count: int, fact_count: int) -> Path:
+def _run_condition_dir(table_count: int, fact_count: int) -> Path:
     table_count = _positive_int(table_count, "table_count")
     fact_count = _positive_int(fact_count, "fact_count")
     if fact_count == 10_000:
-        return (
-            EXP01_RUNS_DIR
-            / "t_sweep_N10K"
-            / f"T{table_count}"
-            / "PLACEHOLDER_RUN"
-        )
+        return EXP01_RUNS_DIR / "t_sweep_N10K" / f"T{table_count}"
     if table_count == 8:
-        return (
-            EXP01_RUNS_DIR
-            / "n_sweep_T8"
-            / _fact_count_label(fact_count)
-            / "PLACEHOLDER_RUN"
-        )
-    raise ValueError("non-N10K CPT runs must use the n_sweep_T8 architecture")
+        return EXP01_RUNS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
+    return (
+        EXP01_RUNS_DIR
+        / "conditions"
+        / f"T{table_count}_{_fact_count_label(fact_count)}"
+    )
 
 
-def target_sft_run_dir(table_count: int, fact_count: int) -> Path:
+def cpt_run_dir(table_count: int, fact_count: int, layers: int) -> Path:
+    layers = _positive_int(layers, "layers")
+    return _run_condition_dir(table_count, fact_count) / f"L{layers}" / "cpt"
+
+
+def target_sft_run_dir(table_count: int, fact_count: int, layers: int) -> Path:
     """Return the stage-specific run directory for closed-book target SFT."""
-    table_count = _positive_int(table_count, "table_count")
-    fact_count = _positive_int(fact_count, "fact_count")
-    if fact_count == 10_000:
-        condition_dir = EXP01_RUNS_DIR / "t_sweep_N10K" / f"T{table_count}"
-    elif table_count == 8:
-        condition_dir = EXP01_RUNS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
-    else:
-        raise ValueError(
-            "non-N10K target-SFT runs must use the n_sweep_T8 architecture"
-        )
-    return condition_dir / "target_sft"
+    layers = _positive_int(layers, "layers")
+    return _run_condition_dir(table_count, fact_count) / f"L{layers}" / "target_sft"
 
 
 def t_sweep_qa_dir(table_count: int) -> Path:
@@ -116,14 +108,24 @@ def qa_condition_dir(table_count: int, fact_count: int) -> Path:
         return t_sweep_qa_dir(table_count)
     if table_count == 8:
         return n_sweep_qa_dir(fact_count)
-    raise ValueError("non-N10K QA conditions must use the n_sweep_T8 architecture")
+    return (
+        EXP01_QA_DIR / "conditions" / f"T{table_count}_{_fact_count_label(fact_count)}"
+    )
+
+
+def qa_reference_dir(config: dict) -> Path:
+    reference = config.get("data", {}).get("qa_reference")
+    if not isinstance(reference, dict):
+        raise ValueError("data.qa_reference configuration is required")
+    return qa_condition_dir(reference.get("table_count"), reference.get("fact_count"))
 
 
 def evaluation_result_dir(
-    table_count: int, fact_count: int, split: str, run_name: str
+    table_count: int, fact_count: int, layers: int, split: str, run_name: str
 ) -> Path:
     table_count = _positive_int(table_count, "table_count")
     fact_count = _positive_int(fact_count, "fact_count")
+    layers = _positive_int(layers, "layers")
     if split not in {"validation", "test"}:
         raise ValueError("split must be validation or test")
     if not isinstance(run_name, str) or not re.fullmatch(
@@ -133,14 +135,14 @@ def evaluation_result_dir(
     if fact_count == 10_000:
         condition_dir = EXP01_RESULTS_DIR / "t_sweep_N10K" / f"T{table_count}"
     elif table_count == 8:
-        condition_dir = (
-            EXP01_RESULTS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
-        )
+        condition_dir = EXP01_RESULTS_DIR / "n_sweep_T8" / _fact_count_label(fact_count)
     else:
-        raise ValueError(
-            "non-N10K evaluation conditions must use the n_sweep_T8 architecture"
+        condition_dir = (
+            EXP01_RESULTS_DIR
+            / "conditions"
+            / f"T{table_count}_{_fact_count_label(fact_count)}"
         )
-    return condition_dir / split / run_name
+    return condition_dir / f"L{layers}" / split / run_name
 
 
 def ensure_dir(path: str | Path) -> Path:

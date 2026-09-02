@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from config import DEFAULT_CONFIG_PATH, load_config
+from experiment import ExperimentCondition, verify_checkpoint_layers
 from training.cpt import run_cpt_training
 from training.target_sft import run_target_sft_training
 from utils.paths import (
@@ -21,7 +21,7 @@ from utils.paths import (
     cpt_database_dir,
     cpt_run_dir,
     database_condition_dir,
-    qa_condition_dir,
+    qa_reference_dir,
     target_sft_run_dir,
 )
 
@@ -39,17 +39,13 @@ def _resolve_source_checkpoint(path: Path) -> Path:
 
 
 def build_cpt_paths(
-    config: dict, *, table_count: int, fact_count: int
+    config: dict, *, table_count: int, fact_count: int, layers: int
 ) -> dict[str, Path]:
     condition_dir = database_condition_dir(table_count, fact_count)
     cpt_dir = cpt_database_dir(table_count, fact_count)
-    run_dir = cpt_run_dir(table_count, fact_count)
-    layer_count = config["model"]["layers"]
+    run_dir = cpt_run_dir(table_count, fact_count, layers)
     epochs = config["training"]["cpt_epochs"]
-    stem = (
-        f"exp01_tsweep_T{table_count}_N{fact_count // 1000}K_"
-        f"L{layer_count}_E{epochs}"
-    )
+    stem = f"exp01_tsweep_T{table_count}_N{fact_count // 1000}K_L{layers}_E{epochs}"
     model_name = config["model"]["name"].replace("/", "_")
     return {
         "database": condition_dir / "database.sqlite",
@@ -63,7 +59,7 @@ def build_cpt_paths(
             TRAINED_MODELS_DIR
             / (
                 f"{model_name}_cpt_t{table_count}_"
-                f"{_fact_count_label(fact_count)}_e{epochs}"
+                f"{_fact_count_label(fact_count)}_l{layers}_e{epochs}"
             )
         ),
     }
@@ -74,16 +70,21 @@ def build_target_sft_paths(
     *,
     table_count: int,
     fact_count: int,
+    layers: int,
     source_checkpoint: Path,
 ) -> dict[str, Path]:
     settings = config["target_sft"]
     epochs = settings["epochs"]
-    source_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", source_checkpoint.name)
-    checkpoint_name = f"{source_name}_sft_target_e{epochs}"
-    run_stem = f"{checkpoint_name}_T{table_count}_N{fact_count}"
-    run_dir = target_sft_run_dir(table_count, fact_count)
+    model_name = config["model"]["name"].replace("/", "_")
+    cpt_epochs = config["training"]["cpt_epochs"]
+    checkpoint_name = (
+        f"{model_name}_cpt_t{table_count}_{_fact_count_label(fact_count)}_"
+        f"l{layers}_e{cpt_epochs}_sft_target_e{epochs}"
+    )
+    run_stem = checkpoint_name
+    run_dir = target_sft_run_dir(table_count, fact_count, layers)
     return {
-        "qa_condition_dir": qa_condition_dir(table_count, fact_count),
+        "qa_condition_dir": qa_reference_dir(config),
         "run_config": run_dir / f"{run_stem}_config.yaml",
         "train_log": run_dir / f"{run_stem}_trainlog.jsonl",
         "output_checkpoint": TRAINED_MODELS_DIR / checkpoint_name,
@@ -95,6 +96,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--stage", required=True, choices=("cpt", "target-sft"))
     parser.add_argument("--table-count", required=True, type=int)
     parser.add_argument("--fact-count", required=True, type=int)
+    parser.add_argument("--layers", required=True, type=int)
     parser.add_argument("--source-checkpoint", required=True, type=Path)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     return parser.parse_args()
@@ -103,18 +105,27 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     config = load_config(args.config.resolve())
+    condition = ExperimentCondition.from_config(
+        config,
+        table_count=args.table_count,
+        fact_count=args.fact_count,
+        layers=args.layers,
+    )
     source_checkpoint = _resolve_source_checkpoint(args.source_checkpoint)
+    verify_checkpoint_layers(source_checkpoint, condition.layers)
     if args.stage == "target-sft":
         paths = build_target_sft_paths(
             config,
             table_count=args.table_count,
             fact_count=args.fact_count,
+            layers=args.layers,
             source_checkpoint=source_checkpoint,
         )
         summary = run_target_sft_training(
             config,
             table_count=args.table_count,
             fact_count=args.fact_count,
+            layers=args.layers,
             source_checkpoint=source_checkpoint,
             output_checkpoint=paths["output_checkpoint"],
             run_config_path=paths["run_config"],
@@ -132,12 +143,16 @@ def main() -> None:
         return
 
     paths = build_cpt_paths(
-        config, table_count=args.table_count, fact_count=args.fact_count
+        config,
+        table_count=args.table_count,
+        fact_count=args.fact_count,
+        layers=args.layers,
     )
     summary = run_cpt_training(
         config,
         table_count=args.table_count,
         fact_count=args.fact_count,
+        layers=args.layers,
         source_checkpoint=source_checkpoint,
         output_checkpoint=paths["output_checkpoint"],
         run_config_path=paths["run_config"],

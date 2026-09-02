@@ -191,10 +191,19 @@ def test_readable_book_is_natural_complete_and_repeated_exactly_x4(
             for row in connection.execute(f'SELECT "{id_field}" FROM "{table}"')
         ]
     assert all(identifier not in readable_book for identifier in raw_identifiers)
-    assert "Eastern Ancient Oak Isles is a continent with a polar climate band." in readable_book
-    assert "Golden Glenovia Federation belongs to Eastern Ancient Oak Isles." in readable_book
+    assert (
+        "Eastern Ancient Oak Isles is a continent with a polar climate band."
+        in readable_book
+    )
+    assert (
+        "Golden Glenovia Federation belongs to Eastern Ancient Oak Isles."
+        in readable_book
+    )
     assert "Section G03 of Bright Markets and Institutions" in readable_book
-    assert "Ravi K. Novak's primary enrollment is the Spring 2026 enrollment" in readable_book
+    assert (
+        "Ravi K. Novak's primary enrollment is the Spring 2026 enrollment"
+        in readable_book
+    )
 
 
 def test_serialization_is_byte_deterministic(
@@ -238,20 +247,23 @@ def test_physical_t_grouping_is_preserved_without_changing_logical_coverage(
             ["enrollment"],
             ["student"],
         ],
-        12: [[spec] for spec in (
-            "continent",
-            "country",
-            "region",
-            "city",
-            "campus",
-            "school",
-            "department",
-            "subject",
-            "course",
-            "course_offering",
-            "enrollment",
-            "student",
-        )],
+        12: [
+            [spec]
+            for spec in (
+                "continent",
+                "country",
+                "region",
+                "city",
+                "campus",
+                "school",
+                "department",
+                "subject",
+                "course",
+                "course_offering",
+                "enrollment",
+                "student",
+            )
+        ],
     }
     expected_headings = {
         4: [
@@ -293,9 +305,7 @@ def test_physical_t_grouping_is_preserved_without_changing_logical_coverage(
     for table_count in (4, 8, 12):
         fixture_root = tmp_path / f"t{table_count}"
         fixture_root.mkdir()
-        paths = _temporary_condition(
-            fixture_root, cpt_config, table_count=table_count
-        )
+        paths = _temporary_condition(fixture_root, cpt_config, table_count=table_count)
         manifest = read_json(paths["cpt_manifest"])
         readable_book = read_text(paths["readable_book"])
         groups = manifest["physical_record_groups"]
@@ -329,8 +339,7 @@ def test_t12_n10k_temporary_book_accounts_for_all_canonical_facts(
     assert manifest["source_identifier_count"] == 3_000
     assert manifest["identifiers_in_readable_book"] == 0
     assert all(
-        group["row_count"] == 250
-        for group in manifest["physical_record_groups"]
+        group["row_count"] == 250 for group in manifest["physical_record_groups"]
     )
     assert read_text(paths["train_text"]) == read_text(paths["readable_book"]) * 4
 
@@ -395,9 +404,7 @@ def test_cpt_provenance_verification_and_hash_failures(
     assert provenance["N"] == 200
     assert provenance["fact_exposure"] == 4
     assert provenance["source_database_sha256"] == hash_file(paths["database"])
-    assert provenance["readable_book_sha256"] == hash_file(
-        paths["readable_book"]
-    )
+    assert provenance["readable_book_sha256"] == hash_file(paths["readable_book"])
 
     paths["train_text"].write_text(
         read_text(paths["train_text"]) + "tampered", encoding="utf-8"
@@ -469,9 +476,7 @@ def test_inconsistent_t_n_and_empty_artifacts_fail_clearly(
 
 def test_chunking_uses_every_token_once_and_masks_only_padding() -> None:
     token_ids = list(range(1, 11))
-    examples, statistics = chunk_token_ids(
-        token_ids, context_length=4, pad_token_id=99
-    )
+    examples, statistics = chunk_token_ids(token_ids, context_length=4, pad_token_id=99)
     assert statistics == {
         "total_tokens": 10,
         "supervised_tokens": 10,
@@ -670,8 +675,7 @@ def test_seeded_dataloader_shuffling_is_deterministic() -> None:
             list(range(20)), batch_size=4, shuffle=True, generator=generator
         )
         return [
-            [value for batch in loader for value in batch.tolist()]
-            for _ in range(3)
+            [value for batch in loader for value in batch.tolist()] for _ in range(3)
         ]
 
     first = epoch_orders(2025)
@@ -755,22 +759,20 @@ def test_cpt_enables_every_model_parameter() -> None:
 
 
 def test_canonical_cpt_and_run_path_resolution() -> None:
-    condition = (
-        EXP01_GENERATED_DATABASES_DIR / "t_sweep_N10K" / "T12"
-    )
+    condition = EXP01_GENERATED_DATABASES_DIR / "t_sweep_N10K" / "T12"
     assert database_condition_dir(12, 10_000) == condition
     assert cpt_database_dir(12, 10_000) == condition / "cpt"
-    assert cpt_run_dir(12, 10_000) == (
-        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "PLACEHOLDER_RUN"
+    assert cpt_run_dir(12, 10_000, 12) == (
+        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "L12" / "cpt"
     )
     paths = train_script.build_cpt_paths(
-        load_config(), table_count=12, fact_count=10_000
+        load_config(), table_count=12, fact_count=10_000, layers=12
     )
     assert paths["database"] == condition / "database.sqlite"
     assert paths["readable_book"] == condition / "cpt" / "book_readable.txt"
     assert paths["train_text"] == condition / "cpt" / "train.txt"
     assert paths["cpt_manifest"] == condition / "cpt" / "manifest.json"
-    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k_e20"
+    assert paths["output_checkpoint"].name == "gpt2_cpt_t12_n10k_l12_e20"
     assert paths["run_config"].name.endswith("L12_E20_config_PLACEHOLDER.yaml")
     assert paths["train_log"].name.endswith("L12_E20_trainlog_PLACEHOLDER.jsonl")
 

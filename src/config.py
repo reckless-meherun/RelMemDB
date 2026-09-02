@@ -174,6 +174,17 @@ def validate_config(config: dict[str, Any]) -> None:
         _required(canonical_target, "fact_count", "data.canonical_target"),
         "data.canonical_target.fact_count",
     )
+    qa_reference = _require_mapping(
+        _required(data, "qa_reference", "data"), "data.qa_reference"
+    )
+    qa_reference_table_count = _require_positive_int(
+        _required(qa_reference, "table_count", "data.qa_reference"),
+        "data.qa_reference.table_count",
+    )
+    qa_reference_fact_count = _require_positive_int(
+        _required(qa_reference, "fact_count", "data.qa_reference"),
+        "data.qa_reference.fact_count",
+    )
     largest_table_count = max([*table_counts, n_sweep_table_count])
     if latent_positions < largest_table_count:
         raise ConfigError(
@@ -210,6 +221,8 @@ def validate_config(config: dict[str, Any]) -> None:
         )
     if (canonical_table_count, canonical_fact_count) != (12, 10_000):
         raise ConfigError("data.canonical_target must be T12/N10K")
+    if (qa_reference_table_count, qa_reference_fact_count) != (12, 10_000):
+        raise ConfigError("data.qa_reference must identify the immutable T12/N10K benchmark")
     configured_fact_counts = [t_sweep_fact_count, *fact_counts, optional_fact_count]
     for fact_count in configured_fact_counts:
         if fact_count % experimental_facts_per_chain != 0:

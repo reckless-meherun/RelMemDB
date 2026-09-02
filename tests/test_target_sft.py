@@ -67,9 +67,7 @@ def test_target_sft_prompt_and_answer_only_labels_are_exact() -> None:
     answer_ids = tokenizer.encode(record["gold_answer"], add_special_tokens=False)
 
     assert encoded["prompt"] == (
-        "Question:\n"
-        "What climate band does the containing continent have?\n\n"
-        "Answer:"
+        "Question:\nWhat climate band does the containing continent have?\n\nAnswer:"
     )
     assert "private_h0" not in encoded["prompt"]
     assert "support_fact_ids" not in encoded["prompt"]
@@ -310,7 +308,9 @@ def test_target_sft_loader_rejects_manifest_provenance_tampering(
     tmp_path: Path,
 ) -> None:
     condition_dir = tmp_path / "qa"
-    shutil.copytree(qa_condition_dir(12, 10_000) / "target_sft", condition_dir / "target_sft")
+    shutil.copytree(
+        qa_condition_dir(12, 10_000) / "target_sft", condition_dir / "target_sft"
+    )
     root_path = condition_dir / "target_sft" / "split_manifest.json"
     root = read_json(root_path)
     root["train_manifest_sha256"] = "0" * 64
@@ -375,9 +375,7 @@ def test_target_sft_dev_metric_summary_tracks_selection_breakdowns() -> None:
             support_fact_ids=["h0_attr", "h0_rel", "h0_attr", "h0_rel"],
         ),
     ]
-    metrics = summarize_target_sft_dev_metrics(
-        predictions, dev_answer_only_loss=0.25
-    )
+    metrics = summarize_target_sft_dev_metrics(predictions, dev_answer_only_loss=0.25)
     assert metrics == {
         "dev_answer_only_loss": 0.25,
         "dev_overall_normalized_exact_match": 0.6,
@@ -422,9 +420,7 @@ def test_target_sft_dev_evaluation_uses_only_supplied_dev_records_and_greedy_pat
         kwargs["tokenizer"].padding_side = "left"
         return predictions
 
-    monkeypatch.setattr(
-        target_sft_module, "generate_prediction_records", fake_generate
-    )
+    monkeypatch.setattr(target_sft_module, "generate_prediction_records", fake_generate)
 
     class FakeModel:
         training = True
@@ -483,18 +479,10 @@ def _epoch(epoch: int, em: float, loss: float) -> dict[str, Any]:
 
 def test_target_sft_best_epoch_selection_and_tie_breaks() -> None:
     assert target_sft_epoch_is_better(_epoch(1, 0.4, 0.8), None)
-    assert target_sft_epoch_is_better(
-        _epoch(2, 0.5, 0.9), _epoch(1, 0.4, 0.1)
-    )
-    assert target_sft_epoch_is_better(
-        _epoch(2, 0.5, 0.7), _epoch(1, 0.5, 0.8)
-    )
-    assert not target_sft_epoch_is_better(
-        _epoch(2, 0.5, 0.8), _epoch(1, 0.5, 0.8)
-    )
-    assert target_sft_epoch_is_better(
-        _epoch(1, 0.5, 0.8), _epoch(2, 0.5, 0.8)
-    )
+    assert target_sft_epoch_is_better(_epoch(2, 0.5, 0.9), _epoch(1, 0.4, 0.1))
+    assert target_sft_epoch_is_better(_epoch(2, 0.5, 0.7), _epoch(1, 0.5, 0.8))
+    assert not target_sft_epoch_is_better(_epoch(2, 0.5, 0.8), _epoch(1, 0.5, 0.8))
+    assert target_sft_epoch_is_better(_epoch(1, 0.5, 0.8), _epoch(2, 0.5, 0.8))
 
 
 def test_target_sft_patience_stops_after_three_completed_non_improving_epochs() -> None:
@@ -567,16 +555,15 @@ def test_target_sft_path_derives_expected_checkpoint_from_source(
         load_config(),
         table_count=12,
         fact_count=10_000,
+        layers=12,
         source_checkpoint=Path("models/trained_models/gpt2_cpt_t12_n10k_e20"),
     )
     assert paths["qa_condition_dir"] == qa_condition_dir(12, 10_000)
     assert paths["output_checkpoint"] == (
-        PROJECT_ROOT
-        / "models/trained_models/gpt2_cpt_t12_n10k_e20_sft_target_e10"
+        PROJECT_ROOT / "models/trained_models/gpt2_cpt_t12_n10k_l12_e20_sft_target_e10"
     )
     previous_diagnostic = (
-        PROJECT_ROOT
-        / "models/trained_models/gpt2_cpt_t12_n10k_e20_sft_validation_e10"
+        PROJECT_ROOT / "models/trained_models/gpt2_cpt_t12_n10k_e20_sft_validation_e10"
     )
     previous_config_hash = hash_file(previous_diagnostic / "config.json")
     assert paths["output_checkpoint"] != previous_diagnostic
@@ -598,7 +585,7 @@ def test_train_cli_routes_target_sft_without_calling_cpt(
 ) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    (source / "config.json").write_text("{}", encoding="utf-8")
+    (source / "config.json").write_text('{"n_layer": 12}', encoding="utf-8")
     expected_paths = {
         "qa_condition_dir": tmp_path / "qa",
         "run_config": tmp_path / "run.yaml",
@@ -613,6 +600,7 @@ def test_train_cli_routes_target_sft_without_calling_cpt(
             stage="target-sft",
             table_count=12,
             fact_count=10_000,
+            layers=12,
             source_checkpoint=source,
             config=Path("unused.yaml"),
         ),
@@ -651,7 +639,7 @@ def test_train_cli_keeps_existing_cpt_route(
 ) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    (source / "config.json").write_text("{}", encoding="utf-8")
+    (source / "config.json").write_text('{"n_layer": 12}', encoding="utf-8")
     paths = {
         key: tmp_path / key
         for key in (
@@ -673,6 +661,7 @@ def test_train_cli_keeps_existing_cpt_route(
             stage="cpt",
             table_count=12,
             fact_count=10_000,
+            layers=12,
             source_checkpoint=source,
             config=Path("unused.yaml"),
         ),

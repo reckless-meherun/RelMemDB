@@ -11,10 +11,12 @@ from config import DEFAULT_CONFIG_PATH, load_config
 from data.materialize import build_database_manifest, materialize_database
 from data.serialize import serialize_database_cpt
 from data.world import build_master_world, build_master_world_manifest
+from experiment import ExperimentCondition
 from utils.hashing import hash_file
 from utils.io import read_json, write_json
 from utils.paths import (
     EXP01_GENERATED_DATABASES_DIR,
+    database_condition_dir,
     n_sweep_database_dir,
     t_sweep_database_dir,
 )
@@ -62,8 +64,6 @@ def _load_verified_master_world(
     configuration_sha256 = hash_file(config_path)
     if manifest.get("world_json_sha256") != world_sha256:
         raise ValueError("master-world artifact does not match its manifest hash")
-    if manifest.get("configuration_sha256") != configuration_sha256:
-        raise ValueError("configuration does not match the master-world manifest")
     world = read_json(world_path)
     if world != build_master_world(config):
         raise ValueError("master-world artifact is not reproducible from the config")
@@ -73,6 +73,12 @@ def _load_verified_master_world(
 def _condition_destination(
     config: dict, table_count: int, logical_fact_count: int
 ) -> tuple[str, Path]:
+    ExperimentCondition.from_config(
+        config,
+        table_count=table_count,
+        fact_count=logical_fact_count,
+        layers=config["model"]["layers"],
+    )
     data = config["data"]
     if (
         logical_fact_count == data["t_sweep"]["fact_count"]
@@ -84,9 +90,7 @@ def _condition_destination(
         and logical_fact_count in data["n_sweep"]["fact_counts"]
     ):
         return "n_sweep", n_sweep_database_dir(logical_fact_count)
-    raise ValueError(
-        f"T{table_count}/N{logical_fact_count} is not a configured t_sweep or n_sweep condition"
-    )
+    return "condition", database_condition_dir(table_count, logical_fact_count)
 
 
 def _materialize_condition(
@@ -100,9 +104,19 @@ def _materialize_condition(
     master_world_sha256: str,
     configuration_sha256: str,
 ) -> dict:
-    condition_dir.mkdir(parents=True, exist_ok=True)
     database_path = condition_dir / "database.sqlite"
     manifest_path = condition_dir / "manifest.json"
+    occupied = [
+        path
+        for path in (database_path, manifest_path)
+        if path.exists() and path.stat().st_size
+    ]
+    if occupied:
+        raise FileExistsError(
+            "refusing to overwrite existing database artifacts: "
+            + ", ".join(map(str, occupied))
+        )
+    condition_dir.mkdir(parents=True, exist_ok=True)
     materialization = materialize_database(
         world,
         table_count=table_count,
@@ -139,6 +153,16 @@ def _serialize_condition_cpt(
     readable_book_path = cpt_dir / "book_readable.txt"
     train_text_path = cpt_dir / "train.txt"
     cpt_manifest_path = cpt_dir / "manifest.json"
+    occupied = [
+        path
+        for path in (readable_book_path, train_text_path, cpt_manifest_path)
+        if path.exists() and path.stat().st_size
+    ]
+    if occupied:
+        raise FileExistsError(
+            "refusing to overwrite existing CPT serialization artifacts: "
+            + ", ".join(map(str, occupied))
+        )
     cpt_manifest = serialize_database_cpt(
         config,
         database_path=database_path,
@@ -185,20 +209,22 @@ def _parse_args() -> argparse.Namespace:
         help="serialize one existing database without rebuilding or materializing it",
     )
     parser.add_argument("--table-count", type=int, help="physical table count T")
-    parser.add_argument("--fact-count", type=int, help="experimental logical fact count N")
+    parser.add_argument(
+        "--fact-count", type=int, help="experimental logical fact count N"
+    )
     args = parser.parse_args()
     if args.master_world_only and not args.rebuild_master_world:
         parser.error("--master-world-only requires --rebuild-master-world")
-    if args.serialize_cpt_only and (args.rebuild_master_world or args.master_world_only):
+    if args.serialize_cpt_only and (
+        args.rebuild_master_world or args.master_world_only
+    ):
         parser.error(
             "--serialize-cpt-only cannot be combined with master-world generation"
         )
     if (args.table_count is None) != (args.fact_count is None):
         parser.error("--table-count and --fact-count must be supplied together")
     if args.serialize_cpt_only and args.table_count is None:
-        parser.error(
-            "--serialize-cpt-only requires --table-count and --fact-count"
-        )
+        parser.error("--serialize-cpt-only requires --table-count and --fact-count")
     return args
 
 

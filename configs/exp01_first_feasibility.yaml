@@ -34,6 +34,9 @@ data:
   canonical_target:
     table_count: 12
     fact_count: 10000
+  qa_reference:
+    table_count: 12
+    fact_count: 10000
 
 training:
   fact_exposure: 4

@@ -24,6 +24,7 @@ from utils.paths import (
     n_sweep_database_dir,
     n_sweep_qa_dir,
     qa_condition_dir,
+    qa_reference_dir,
     t_sweep_database_dir,
     t_sweep_qa_dir,
     target_sft_run_dir,
@@ -47,7 +48,10 @@ def test_main_directory_constants() -> None:
     assert RUNS_DIR == PROJECT_ROOT / "runs"
     assert RESULTS_DIR == PROJECT_ROOT / "results"
     assert DOCS_DIR == PROJECT_ROOT / "docs"
-    assert EXP01_GENERATED_DATABASES_DIR == GENERATED_DATABASES_DIR / "exp01_first_feasibility"
+    assert (
+        EXP01_GENERATED_DATABASES_DIR
+        == GENERATED_DATABASES_DIR / "exp01_first_feasibility"
+    )
     assert EXP01_QA_DIR == QA_DIR / "exp01_first_feasibility"
     assert EXP01_RUNS_DIR == RUNS_DIR / "exp01_first_feasibility"
     assert EXP01_RESULTS_DIR == RESULTS_DIR / "exp01_first_feasibility"
@@ -86,6 +90,10 @@ def test_default_experiment_config() -> None:
     assert config["data"]["n_sweep"]["table_count"] == 8
     assert config["data"]["hops"] == [0, 1, 2, 3]
     assert config["data"]["canonical_target"] == {
+        "table_count": 12,
+        "fact_count": 10_000,
+    }
+    assert config["data"]["qa_reference"] == {
         "table_count": 12,
         "fact_count": 10_000,
     }
@@ -162,34 +170,30 @@ def test_canonical_cpt_paths() -> None:
     condition = EXP01_GENERATED_DATABASES_DIR / "t_sweep_N10K" / "T12"
     assert database_condition_dir(12, 10_000) == condition
     assert cpt_database_dir(12, 10_000) == condition / "cpt"
-    assert cpt_run_dir(12, 10_000) == (
-        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "PLACEHOLDER_RUN"
+    assert cpt_run_dir(12, 10_000, 12) == (
+        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "L12" / "cpt"
     )
 
 
 def test_canonical_closed_book_qa_path() -> None:
-    assert qa_condition_dir(12, 10_000) == (
-        EXP01_QA_DIR / "t_sweep_N10K" / "T12"
-    )
-    assert target_sft_run_dir(12, 10_000) == (
-        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "target_sft"
+    assert qa_condition_dir(12, 10_000) == (EXP01_QA_DIR / "t_sweep_N10K" / "T12")
+    assert qa_reference_dir(load_config()) == qa_condition_dir(12, 10_000)
+    assert target_sft_run_dir(12, 10_000, 12) == (
+        EXP01_RUNS_DIR / "t_sweep_N10K" / "T12" / "L12" / "target_sft"
     )
 
 
 def test_canonical_closed_book_evaluation_result_paths() -> None:
-    assert evaluation_result_dir(12, 10_000, "validation", "pre_cpt") == (
-        EXP01_RESULTS_DIR
-        / "t_sweep_N10K"
-        / "T12"
-        / "validation"
-        / "pre_cpt"
+    assert evaluation_result_dir(12, 10_000, 12, "validation", "pre_cpt") == (
+        EXP01_RESULTS_DIR / "t_sweep_N10K" / "T12" / "L12" / "validation" / "pre_cpt"
     )
-    assert evaluation_result_dir(12, 10_000, "validation", "post_cpt_e10") == (
+    assert evaluation_result_dir(12, 10_000, 12, "validation", "post_cpt_e10") == (
         EXP01_RESULTS_DIR
         / "t_sweep_N10K"
         / "T12"
+        / "L12"
         / "validation"
         / "post_cpt_e10"
     )
     with pytest.raises(ValueError, match="filesystem-safe"):
-        evaluation_result_dir(12, 10_000, "validation", "../escape")
+        evaluation_result_dir(12, 10_000, 12, "validation", "../escape")
