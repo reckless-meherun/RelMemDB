@@ -1,0 +1,59 @@
+{
+  "T": 4,
+  "actual_logical_fact_count": 10000,
+  "attribute_fact_count": 7250,
+  "attribute_facts_per_chain": 29,
+  "configuration_sha256": "59500e865f8ec248c91e966cf97dc3f855993c392cc4690b8f8609afc19db3d6",
+  "cross_table_fk_edge_count": 3,
+  "cross_table_fk_instance_count": 750,
+  "database_sha256": "f967996b2028ab87802a9bbeeb404722ca1fd4cd63ce58535931d7989f5340eb",
+  "experiment_name": "exp01_first_feasibility",
+  "experimental_facts_per_chain": 40,
+  "format_version": 2,
+  "identifier_field_count": 3000,
+  "identifier_fields_per_chain": 12,
+  "identifiers_counted_as_experimental_facts": false,
+  "intra_table_fk_edge_count": 8,
+  "intra_table_fk_instance_count": 2000,
+  "latent_positions": 12,
+  "logical_content_sha256": "f9313c33c0c4af48d797501f6e7c9ba209bfd07524c9427d8245912569f84c97",
+  "master_world_sha256": "5cc94b7436377b7584852a3c4a8c6f3b44afb83f2b99ac32e9dc16e476c36436",
+  "physical_row_count": 1000,
+  "position_partition": [
+    [
+      0,
+      1,
+      2
+    ],
+    [
+      3,
+      4,
+      5
+    ],
+    [
+      6,
+      7,
+      8
+    ],
+    [
+      9,
+      10,
+      11
+    ]
+  ],
+  "relation_fact_count": 2750,
+  "relation_facts_per_chain": 11,
+  "requested_N": 10000,
+  "rows_per_table": {
+    "city__campus__school": 250,
+    "continent__country__region": 250,
+    "course_offering__enrollment__student": 250,
+    "department__subject__course": 250
+  },
+  "schema_column_count": 52,
+  "schema_foreign_key_count": 11,
+  "selected_chain_count": 250,
+  "stored_value_count": 13000,
+  "sweep": "t_sweep",
+  "table_count": 4
+}

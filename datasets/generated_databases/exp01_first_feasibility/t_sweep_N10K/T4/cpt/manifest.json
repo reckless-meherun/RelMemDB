@@ -1,0 +1,108 @@
+{
+  "T": 4,
+  "attribute_facts_per_exposure": 7250,
+  "experiment_name": "exp01_first_feasibility",
+  "experimental_schema_column_count": 40,
+  "fact_exposure": 4,
+  "format_version": 3,
+  "identifier_schema_column_count": 12,
+  "identifiers_in_readable_book": 0,
+  "instance_sentence_count_per_exposure": 4750,
+  "logical_content_sha256": "f9313c33c0c4af48d797501f6e7c9ba209bfd07524c9427d8245912569f84c97",
+  "logical_entities_per_exposure": 3000,
+  "logical_fact_coverage_sha256": "4b2724f8d6fb23e528d6eb9202a9f45f45f8ea8f3d03877cfc0bc0bdb373216f",
+  "logical_facts_per_exposure": 10000,
+  "physical_record_group_count": 4,
+  "physical_record_groups": [
+    {
+      "entity_types": [
+        "continent",
+        "country",
+        "region"
+      ],
+      "group_index": 1,
+      "physical_table": "continent__country__region",
+      "row_count": 250,
+      "semantic_positions": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "entity_types": [
+        "city",
+        "campus",
+        "school"
+      ],
+      "group_index": 2,
+      "physical_table": "city__campus__school",
+      "row_count": 250,
+      "semantic_positions": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "entity_types": [
+        "department",
+        "subject",
+        "course"
+      ],
+      "group_index": 3,
+      "physical_table": "department__subject__course",
+      "row_count": 250,
+      "semantic_positions": [
+        6,
+        7,
+        8
+      ]
+    },
+    {
+      "entity_types": [
+        "course_offering",
+        "enrollment",
+        "student"
+      ],
+      "group_index": 4,
+      "physical_table": "course_offering__enrollment__student",
+      "row_count": 250,
+      "semantic_positions": [
+        9,
+        10,
+        11
+      ]
+    }
+  ],
+  "physical_rows_per_exposure": 1000,
+  "readable_book_byte_count": 447599,
+  "readable_book_character_count": 447599,
+  "readable_book_copy_count_in_train_text": 4,
+  "readable_book_line_count": 5787,
+  "readable_book_sha256": "5556c1da5b73099a03f38b2174f69aa3d3de9e907afc12f52bb8c7c963ae4d90",
+  "record_organization_sentence_count_per_exposure": 0,
+  "relation_facts_per_exposure": 2750,
+  "requested_N": 10000,
+  "schema_description_sentence_count_per_exposure": 23,
+  "schema_foreign_key_count_per_exposure": 11,
+  "schema_intra_table_relation_count_per_exposure": 8,
+  "schema_relationship_count_per_exposure": 11,
+  "serialization_order": {
+    "entities": "ascending semantic position within each physical row",
+    "exposures": "identical copies of book_readable.txt",
+    "record_groups": "database-manifest position_partition order",
+    "rows": "ascending SQLite rowid within each physical record group"
+  },
+  "serialization_style": "natural_language_db_book_v1",
+  "serialized_logical_fact_occurrences": 40000,
+  "source_database_manifest_sha256": "7117719e2405eba2946781e673371296f49e1f207f19328c6e056f074a4d770d",
+  "source_database_sha256": "f967996b2028ab87802a9bbeeb404722ca1fd4cd63ce58535931d7989f5340eb",
+  "source_identifier_count": 3000,
+  "table_count": 4,
+  "total_schema_column_count": 52,
+  "train_text_byte_count": 1790396,
+  "train_text_character_count": 1790396,
+  "train_text_line_count": 23148,
+  "train_text_sha256": "a5169c909be664d31dc8e136374be07a62e2e8b93fabc0b9677bc2a15082bef7"
+}
