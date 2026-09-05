@@ -97,6 +97,13 @@ python3 scripts/evaluate.py \
   --split validation
 ```
 
+Experiment-2 evaluations authenticate the checkpoint stage from
+`training_metadata.json` and write to
+`results/exp02_capacity_boundary/t_sweep/T{T:02d}/n_sweep/N{N}/{split}/{eval_cpt|eval_sft}/{HH-MM-SS_DD-MM-YYYY}/`.
+Each timestamped directory contains `evaluation_config.json`, `metrics.json`, and
+`predictions.jsonl`; model, layer, and selected-table details remain in the
+evaluation configuration rather than the path.
+
 N controls model-independent database knowledge content. Training metadata
 separately records model/tokenizer identity, readable-book tokens, train tokens,
 sequence count, epochs, optimizer steps, and effective fact exposure.

@@ -660,6 +660,8 @@ def run_cpt_training(
         "tokenization": token_statistics,
         "training": plan,
     }
+    if config["experiment"]["name"] == "exp02_capacity_boundary":
+        run_record["stage"] = "cpt"
     write_yaml(run_config_path, run_record)
 
     step_records: list[dict[str, Any]] = []

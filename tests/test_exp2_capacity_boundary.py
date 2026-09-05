@@ -1,9 +1,13 @@
+import argparse
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+import scripts.evaluate as evaluate_script
 
 from config import load_config
 from data.materialize import (
@@ -24,7 +28,11 @@ from training.cpt import build_cpt_training_plan
 from training.target_sft import build_target_sft_training_plan
 from utils.hashing import hash_file
 from utils.io import read_text, write_json
-from utils.paths import exp2_condition_label
+from utils.paths import (
+    EXP02_RESULTS_DIR,
+    exp2_condition_label,
+    exp2_evaluation_result_dir,
+)
 
 
 @pytest.fixture(scope="module")
@@ -157,6 +165,181 @@ def test_exp2_paths_and_model_defaults() -> None:
     checkpoint, layers = resolve_model_checkpoint("gpt2")
     assert checkpoint.name == "gpt2"
     assert layers == 12
+
+
+def test_exp2_evaluation_result_path_uses_exact_n_and_timestamp() -> None:
+    assert exp2_evaluation_result_dir(
+        table_count=2,
+        fact_count=1000,
+        split="validation",
+        stage="eval_cpt",
+        timestamp="12-34-56_05-09-2026",
+    ) == (
+        EXP02_RESULTS_DIR
+        / "t_sweep"
+        / "T02"
+        / "n_sweep"
+        / "N1000"
+        / "validation"
+        / "eval_cpt"
+        / "12-34-56_05-09-2026"
+    )
+    with pytest.raises(ValueError, match="HH-MM-SS_DD-MM-YYYY"):
+        exp2_evaluation_result_dir(
+            table_count=2,
+            fact_count=1000,
+            split="validation",
+            stage="eval_cpt",
+            timestamp="20260905_123456",
+        )
+
+
+def test_exp2_evaluation_stage_comes_from_checkpoint_metadata() -> None:
+    assert evaluate_script._exp2_evaluation_stage(
+        {"experiment": "exp02_capacity_boundary", "stage": "cpt"}
+    ) == "eval_cpt"
+    assert evaluate_script._exp2_evaluation_stage(
+        {"experiment": "exp02_capacity_boundary", "stage": "target-sft"}
+    ) == "eval_sft"
+    with pytest.raises(ValueError, match="stage must be"):
+        evaluate_script._exp2_evaluation_stage(
+            {"experiment": "exp02_capacity_boundary"}
+        )
+
+
+def test_exp2_result_reservation_never_reuses_timestamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        evaluate_script,
+        "exp2_evaluation_result_dir",
+        lambda **kwargs: tmp_path
+        / f"T{kwargs['table_count']:02d}"
+        / f"N{kwargs['fact_count']}"
+        / kwargs["split"]
+        / kwargs["stage"]
+        / kwargs["timestamp"],
+    )
+    started_at = datetime(2026, 9, 5, 12, 34, 56, tzinfo=timezone.utc)
+    first, first_timestamp = evaluate_script._reserve_exp2_result_directory(
+        table_count=2,
+        fact_count=1000,
+        split="validation",
+        stage="eval_cpt",
+        started_at=started_at,
+    )
+    second, second_timestamp = evaluate_script._reserve_exp2_result_directory(
+        table_count=2,
+        fact_count=1000,
+        split="validation",
+        stage="eval_cpt",
+        started_at=started_at,
+    )
+    assert first_timestamp == "12-34-56_05-09-2026"
+    assert second_timestamp == "12-34-57_05-09-2026"
+    assert first != second
+
+
+def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    qa_root = tmp_path / "qa"
+    qa_root.mkdir()
+    write_json(
+        qa_root / "split_manifest.json",
+        {
+            "experiment_name": "exp02_capacity_boundary",
+            "T": 2,
+            "requested_N": 1000,
+            "selected_tables": ["continent", "country"],
+            "source_database_sha256": "a" * 64,
+            "source_database_manifest_sha256": "b" * 64,
+        },
+    )
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    write_json(checkpoint / "config.json", {"model_type": "gpt2", "n_layer": 12})
+    write_json(
+        checkpoint / "training_metadata.json",
+        {
+            "experiment": "exp02_capacity_boundary",
+            "stage": "cpt",
+            "model": "gpt2",
+            "provenance": {"source_database_sha256": "a" * 64},
+        },
+    )
+    output_dir = (
+        tmp_path
+        / "results"
+        / "exp02_capacity_boundary"
+        / "t_sweep"
+        / "T02"
+        / "n_sweep"
+        / "N1000"
+        / "validation"
+        / "eval_cpt"
+        / "12-34-56_05-09-2026"
+    )
+    captured: dict[str, object] = {}
+
+    def reserve(**kwargs):
+        captured.update(kwargs)
+        output_dir.mkdir(parents=True)
+        return output_dir, "12-34-56_05-09-2026"
+
+    monkeypatch.setattr(evaluate_script, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_script, "_reserve_exp2_result_directory", reserve)
+    monkeypatch.setattr(
+        evaluate_script,
+        "load_verified_qa_split",
+        lambda *_, **__: (
+            [{"id": "example"}],
+            {
+                "qa_split_manifest_sha256": "c" * 64,
+                "qa_manifest_sha256": "d" * 64,
+                "input_hashes": {},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        evaluate_script,
+        "evaluate_with_local_checkpoint",
+        lambda *_, **__: ([{"id": "example"}], {"model_identity": "gpt2"}),
+    )
+    monkeypatch.setattr(
+        evaluate_script,
+        "compute_evaluation_metrics",
+        lambda _: {"overall": {"normalized_exact_match_accuracy": 1.0}},
+    )
+    evaluate_script._evaluate_exp2(
+        argparse.Namespace(
+            qa_data_dir=qa_root,
+            table_count=None,
+            fact_count=None,
+            layers=None,
+            checkpoint=checkpoint,
+            split="validation",
+            batch_size=None,
+            run_name=None,
+        ),
+        exp2_config,
+    )
+    assert captured == {
+        "table_count": 2,
+        "fact_count": 1000,
+        "split": "validation",
+        "stage": "eval_cpt",
+    }
+    assert {path.name for path in output_dir.iterdir()} == {
+        "evaluation_config.json",
+        "metrics.json",
+        "predictions.jsonl",
+    }
+    evaluation_config = __import__("json").loads(
+        (output_dir / "evaluation_config.json").read_text(encoding="utf-8")
+    )
+    assert evaluation_config["checkpoint_stage"] == "cpt"
+    assert evaluation_config["evaluation_stage"] == "eval_cpt"
 
 
 def test_exp2_explicit_architecture_depth_override(tmp_path: Path) -> None:

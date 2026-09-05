@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -148,6 +149,39 @@ def evaluation_result_dir(
             / f"T{table_count}_{_fact_count_label(fact_count)}"
         )
     return condition_dir / f"L{layers}" / split / run_name
+
+
+def exp2_evaluation_result_dir(
+    *,
+    table_count: int,
+    fact_count: int,
+    split: str,
+    stage: str,
+    timestamp: str,
+) -> Path:
+    """Return the canonical Experiment-2 directory for one evaluation run."""
+    table_count = _positive_int(table_count, "table_count")
+    fact_count = _positive_int(fact_count, "fact_count")
+    if split not in {"validation", "test"}:
+        raise ValueError("split must be validation or test")
+    if stage not in {"eval_cpt", "eval_sft"}:
+        raise ValueError("stage must be eval_cpt or eval_sft")
+    try:
+        parsed_timestamp = datetime.strptime(timestamp, "%H-%M-%S_%d-%m-%Y")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("timestamp must use HH-MM-SS_DD-MM-YYYY") from exc
+    if parsed_timestamp.strftime("%H-%M-%S_%d-%m-%Y") != timestamp:
+        raise ValueError("timestamp must use HH-MM-SS_DD-MM-YYYY")
+    return (
+        EXP02_RESULTS_DIR
+        / "t_sweep"
+        / f"T{table_count:02d}"
+        / "n_sweep"
+        / f"N{fact_count}"
+        / split
+        / stage
+        / timestamp
+    )
 
 
 def ensure_dir(path: str | Path) -> Path:

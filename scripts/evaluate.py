@@ -2,7 +2,7 @@
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,11 +29,9 @@ from experiment import (
 from utils.hashing import hash_file
 from utils.io import read_json, write_json, write_jsonl
 from utils.paths import (
-    EXP02_RESULTS_DIR,
     evaluation_result_dir,
-    exp2_artifact_stem,
+    exp2_evaluation_result_dir,
     qa_reference_dir,
-    safe_component,
 )
 
 
@@ -59,6 +57,49 @@ def _resolve_checkpoint(path: Path) -> Path:
     if not checkpoint.is_dir() or not (checkpoint / "config.json").is_file():
         raise FileNotFoundError(f"local checkpoint is missing: {checkpoint}")
     return checkpoint
+
+
+def _exp2_evaluation_stage(checkpoint_metadata: dict) -> str:
+    if checkpoint_metadata.get("experiment") != "exp02_capacity_boundary":
+        raise ValueError("checkpoint metadata is not for Experiment 2")
+    checkpoint_stage = checkpoint_metadata.get("stage")
+    try:
+        return {"cpt": "eval_cpt", "target-sft": "eval_sft"}[checkpoint_stage]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            "checkpoint metadata stage must be cpt or target-sft"
+        ) from exc
+
+
+def _reserve_exp2_result_directory(
+    *,
+    table_count: int,
+    fact_count: int,
+    split: str,
+    stage: str,
+    started_at: datetime | None = None,
+) -> tuple[Path, str]:
+    """Atomically reserve a unique second-resolution Experiment-2 result path."""
+    started_at = started_at or datetime.now(timezone.utc)
+    started_at = started_at.astimezone(timezone.utc).replace(microsecond=0)
+    for seconds in range(24 * 60 * 60):
+        timestamp = (started_at + timedelta(seconds=seconds)).strftime(
+            "%H-%M-%S_%d-%m-%Y"
+        )
+        output_dir = exp2_evaluation_result_dir(
+            table_count=table_count,
+            fact_count=fact_count,
+            split=split,
+            stage=stage,
+            timestamp=timestamp,
+        )
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            output_dir.mkdir()
+        except FileExistsError:
+            continue
+        return output_dir, timestamp
+    raise RuntimeError("unable to reserve a unique Experiment-2 evaluation timestamp")
 
 
 def main() -> None:
@@ -198,7 +239,12 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
         expected_table_count=table_count, expected_fact_count=fact_count,
     )
     metadata_path = checkpoint / "training_metadata.json"
-    checkpoint_metadata = read_json(metadata_path) if metadata_path.is_file() else {}
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            "Experiment-2 evaluation requires checkpoint training_metadata.json"
+        )
+    checkpoint_metadata = read_json(metadata_path)
+    evaluation_stage = _exp2_evaluation_stage(checkpoint_metadata)
     current = checkpoint_metadata.get("current_database_condition", {})
     cpt_provenance = checkpoint_metadata.get("provenance", {})
     recorded_database_hash = current.get(
@@ -209,16 +255,12 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
     evaluation = config["evaluation"]
     batch_size = evaluation["batch_size"] if args.batch_size is None else args.batch_size
     model_name = checkpoint_metadata.get("model", config["model"]["name"])
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    stem = exp2_artifact_stem(
-        model=model_name, table_count=table_count, fact_count=fact_count,
-        layers=layers, timestamp=timestamp,
+    output_dir, timestamp = _reserve_exp2_result_directory(
+        table_count=table_count,
+        fact_count=fact_count,
+        split=args.split,
+        stage=evaluation_stage,
     )
-    run_name = args.run_name or "evaluation"
-    if safe_component(run_name) != run_name:
-        raise ValueError("run_name must be a filesystem-safe name")
-    output_dir = EXP02_RESULTS_DIR / stem / args.split / run_name
-    prepare_result_directory(output_dir)
     predictions, model_identity = evaluate_with_local_checkpoint(
         qa_records, checkpoint=checkpoint, batch_size=batch_size,
         context_length=evaluation["context_length"],
@@ -228,6 +270,8 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
     evaluation_config = {
         "experiment_name": "exp02_capacity_boundary",
         "evaluation_timestamp": timestamp,
+        "evaluation_stage": evaluation_stage,
+        "checkpoint_stage": checkpoint_metadata["stage"],
         "T": table_count, "N": fact_count, "L": layers, "M": model_name,
         "selected_tables": selected_tables,
         "qa_data_dir": str(qa_root),
@@ -243,7 +287,7 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
         "checkpoint_path": str(checkpoint),
         "checkpoint_training_metadata_sha256": hash_file(metadata_path) if metadata_path.is_file() else None,
         "checkpoint_layer_verification": layer_provenance,
-        "split": args.split, "run_name": run_name,
+        "split": args.split, "run_name": args.run_name,
         "qa_record_count": len(qa_records),
         "prompt_format": PROMPT_TEMPLATE, "zero_context": True,
         "decoding": {"strategy": "greedy", "do_sample": False, "temperature": None},
