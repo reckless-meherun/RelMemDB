@@ -41,7 +41,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from config import validate_config
-from data.world import validate_selected_tables
+from data.world import facts_per_selected_chain, validate_selected_tables
 from experiment import (
     load_exp2_dataset_condition,
     resolve_model_checkpoint,
@@ -54,6 +54,10 @@ from utils.io import read_json
 EXP2_NAME = "exp02_capacity_boundary"
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "exp02_capacity_boundary.yaml"
 PIPELINE_RUNS_DIR = PROJECT_ROOT / "runs" / EXP2_NAME / "pipeline_runs"
+EXP2_DATASETS_DIR = (
+    PROJECT_ROOT / "datasets" / "generated_databases" / EXP2_NAME
+)
+EXP2_QA_DIR = PROJECT_ROOT / "datasets" / "qa" / EXP2_NAME
 
 TResult = TypeVar("TResult")
 
@@ -423,6 +427,86 @@ def _verify_qa_bundle(
     }
 
 
+def _find_existing_dataset_bundles(
+    *,
+    selected_tables: tuple[str, ...],
+    requested_n: int,
+    seed: int,
+    root: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return authenticated matching datasets in deterministic oldest-first order."""
+    search_root = EXP2_DATASETS_DIR if root is None else root
+    if not search_root.is_dir():
+        return []
+    matches: list[dict[str, Any]] = []
+    for candidate in sorted(
+        (path for path in search_root.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+    ):
+        try:
+            condition = _verify_dataset_bundle(
+                candidate,
+                selected_tables=selected_tables,
+                requested_n=requested_n,
+            )
+        except (OSError, TypeError, ValueError, KeyError):
+            continue
+        if condition["manifest"].get("seed") != seed:
+            continue
+        matches.append(condition)
+    return matches
+
+
+def _find_existing_qa_bundle(
+    *,
+    dataset_condition: dict[str, Any],
+    selected_tables: tuple[str, ...],
+    root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Return the oldest authenticated QA bundle for the exact selected dataset."""
+    search_root = EXP2_QA_DIR if root is None else root
+    if not search_root.is_dir():
+        return None
+    for candidate in sorted(
+        (path for path in search_root.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+    ):
+        try:
+            return _verify_qa_bundle(
+                candidate,
+                dataset_condition=dataset_condition,
+                selected_tables=selected_tables,
+            )
+        except (OSError, TypeError, ValueError, KeyError):
+            continue
+    return None
+
+
+def _automatic_dataset_n(
+    config: dict[str, Any],
+    *,
+    selected_tables: tuple[str, ...],
+    requested_n: int | None,
+) -> int:
+    if requested_n is not None:
+        return requested_n
+    canonical_source = config.get("data", {}).get("canonical_source", {}).get("path")
+    if not isinstance(canonical_source, str) or not canonical_source:
+        raise ValueError("Experiment-2 canonical source path is missing")
+    manifest_path = _require_file(
+        _resolve_path(canonical_source) / "manifest.json",
+        "canonical database manifest",
+    )
+    chain_count = read_json(manifest_path).get("selected_chain_count")
+    if (
+        isinstance(chain_count, bool)
+        or not isinstance(chain_count, int)
+        or chain_count <= 0
+    ):
+        raise ValueError("canonical manifest selected_chain_count is invalid")
+    return chain_count * facts_per_selected_chain(selected_tables)
+
+
 def _selected_tables_from_checkpoint_metadata(metadata: dict[str, Any]) -> list[str] | None:
     experiment_condition = metadata.get("experiment_condition", {})
     current_condition = metadata.get("current_database_condition", {})
@@ -733,6 +817,29 @@ def main() -> None:
     _write_json_atomic(state_path, state)
 
     try:
+        if args.dataset_path is None:
+            expected_n = _automatic_dataset_n(
+                resolved_config,
+                selected_tables=selected_tables,
+                requested_n=args.fact_count,
+            )
+            candidates = _find_existing_dataset_bundles(
+                selected_tables=selected_tables,
+                requested_n=expected_n,
+                seed=resolved_config["experiment"]["seed"],
+            )
+            for candidate in candidates:
+                compatible_qa = _find_existing_qa_bundle(
+                    dataset_condition=candidate,
+                    selected_tables=selected_tables,
+                )
+                if compatible_qa is not None:
+                    args.dataset_path = candidate["bundle"]
+                    args.qa_path = compatible_qa["root"]
+                    break
+            if args.dataset_path is None and candidates:
+                args.dataset_path = candidates[0]["bundle"]
+
         if args.dataset_path is not None:
             dataset_path = _resolve_path(args.dataset_path)
             dataset_condition = _verify_dataset_bundle(
@@ -841,6 +948,14 @@ def main() -> None:
 
         state["cpt_checkpoint_path"] = str(cpt_checkpoint)
         _write_json_atomic(state_path, state)
+
+        if args.qa_path is None:
+            existing_qa = _find_existing_qa_bundle(
+                dataset_condition=dataset_condition,
+                selected_tables=selected_tables,
+            )
+            if existing_qa is not None:
+                args.qa_path = existing_qa["root"]
 
         if args.qa_path is not None:
             qa = _verify_qa_bundle(

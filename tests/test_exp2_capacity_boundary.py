@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import scripts.evaluate as evaluate_script
+import scripts.run_exp02 as exp2_runner
 
 from config import load_config
 from data.materialize import (
@@ -626,3 +627,374 @@ def test_exp2_explicit_path_guards(command: list[str], message: str) -> None:
     )
     assert result.returncode != 0
     assert message in result.stderr
+
+
+def _cached_dataset_bundle(
+    root: Path,
+    name: str,
+    *,
+    tables: list[str],
+    fact_count: int,
+    seed: int = 2025,
+) -> Path:
+    bundle = root / name
+    cpt_dir = bundle / "cpt"
+    cpt_dir.mkdir(parents=True)
+    database = bundle / "database.sqlite"
+    database.write_bytes(f"database:{tables}:{fact_count}:{seed}".encode())
+    per_chain = facts_per_selected_chain(tables)
+    manifest = {
+        "experiment_name": "exp02_capacity_boundary",
+        "T": len(tables),
+        "requested_N": fact_count,
+        "selected_tables": tables,
+        "facts_per_selected_chain": per_chain,
+        "selected_chain_count": fact_count // per_chain,
+        "database_sha256": hash_file(database),
+        "seed": seed,
+    }
+    manifest_path = bundle / "manifest.json"
+    write_json(manifest_path, manifest)
+    (cpt_dir / "book_readable.txt").write_text("book\n", encoding="utf-8")
+    (cpt_dir / "train.txt").write_text("train\n", encoding="utf-8")
+    write_json(
+        cpt_dir / "manifest.json",
+        {
+            "experiment_name": "exp02_capacity_boundary",
+            "T": len(tables),
+            "requested_N": fact_count,
+            "selected_tables": tables,
+            "source_database_sha256": hash_file(database),
+            "source_database_manifest_sha256": hash_file(manifest_path),
+        },
+    )
+    return bundle
+
+
+def _cached_qa_bundle(root: Path, name: str, *, dataset: Path) -> Path:
+    condition = exp2_runner._verify_dataset_bundle(
+        dataset,
+        selected_tables=tuple(
+            read_json(dataset / "manifest.json")["selected_tables"]
+        ),
+        requested_n=read_json(dataset / "manifest.json")["requested_N"],
+    )
+    qa_root = root / name
+    for relative in (
+        "validation/manifest.json",
+        "test/manifest.json",
+        "target_sft/train/manifest.json",
+        "target_sft/dev/manifest.json",
+    ):
+        path = qa_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, {"placeholder": True})
+    shared = {
+        "experiment_name": "exp02_capacity_boundary",
+        "T": condition["T"],
+        "requested_N": condition["N"],
+        "selected_tables": condition["selected_tables"],
+    }
+    write_json(
+        qa_root / "split_manifest.json",
+        {
+            **shared,
+            "source_training_data_dir": str(dataset.resolve()),
+            "source_database_sha256": condition["manifest"]["database_sha256"],
+        },
+    )
+    write_json(qa_root / "target_sft" / "split_manifest.json", shared)
+    return qa_root
+
+
+def test_exp2_runner_finds_oldest_authenticated_dataset_without_running_generator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "datasets"
+    oldest = _cached_dataset_bundle(
+        root,
+        "T01_N500_continent_20260101_000000_000001",
+        tables=["continent"],
+        fact_count=500,
+    )
+    _cached_dataset_bundle(
+        root,
+        "T01_N500_continent_20260102_000000_000001",
+        tables=["continent"],
+        fact_count=500,
+    )
+    monkeypatch.setattr(
+        exp2_runner,
+        "_run_command",
+        lambda *_: pytest.fail("generate_databases.py was called"),
+    )
+    matches = exp2_runner._find_existing_dataset_bundles(
+        selected_tables=("continent",), requested_n=500, seed=2025, root=root
+    )
+    assert [match["bundle"] for match in matches][0] == oldest.resolve()
+
+
+def test_exp2_runner_dataset_cache_identity_includes_n_tables_and_seed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "datasets"
+    _cached_dataset_bundle(
+        root,
+        "fixture",
+        tables=["continent"],
+        fact_count=500,
+    )
+    assert not exp2_runner._find_existing_dataset_bundles(
+        selected_tables=("continent",), requested_n=1000, seed=2025, root=root
+    )
+    assert not exp2_runner._find_existing_dataset_bundles(
+        selected_tables=("continent", "country"),
+        requested_n=500,
+        seed=2025,
+        root=root,
+    )
+    assert not exp2_runner._find_existing_dataset_bundles(
+        selected_tables=("continent",), requested_n=500, seed=7, root=root
+    )
+
+
+def test_exp2_runner_derives_baseline_n_without_training_settings(
+    exp2_config: dict,
+) -> None:
+    changed_training = deepcopy(exp2_config)
+    changed_training["training"]["cpt_epochs"] = 999
+    changed_training["target_sft"]["epochs"] = 777
+    assert exp2_runner._automatic_dataset_n(
+        changed_training,
+        selected_tables=("continent",),
+        requested_n=None,
+    ) == 500
+
+
+def test_exp2_runner_finds_only_qa_bound_to_selected_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset_root = tmp_path / "datasets"
+    qa_root = tmp_path / "qa"
+    selected = _cached_dataset_bundle(
+        dataset_root,
+        "dataset-a",
+        tables=["continent"],
+        fact_count=500,
+    )
+    duplicate = _cached_dataset_bundle(
+        dataset_root,
+        "dataset-b",
+        tables=["continent"],
+        fact_count=500,
+    )
+    _cached_qa_bundle(qa_root, "qa-older-incompatible", dataset=duplicate)
+    compatible = _cached_qa_bundle(qa_root, "qa-newer-compatible", dataset=selected)
+    condition = exp2_runner._verify_dataset_bundle(
+        selected, selected_tables=("continent",), requested_n=500
+    )
+    monkeypatch.setattr(
+        exp2_runner,
+        "_run_command",
+        lambda *_: pytest.fail("generate_target_sft_qa.py was called"),
+    )
+    found = exp2_runner._find_existing_qa_bundle(
+        dataset_condition=condition,
+        selected_tables=("continent",),
+        root=qa_root,
+    )
+    assert found is not None
+    assert found["root"] == compatible.resolve()
+
+
+class _StopExp2Wrapper(Exception):
+    pass
+
+
+def _runner_args(**updates: object) -> argparse.Namespace:
+    values = {
+        "tables": ["continent"],
+        "fact_count": 500,
+        "model": "gpt2",
+        "layers": 12,
+        "base_model": None,
+        "config": Path("configs/exp02_capacity_boundary.yaml"),
+        "cpt_epochs": None,
+        "sft_epochs": None,
+        "cpt_batch_size": None,
+        "cpt_gradient_accumulation": None,
+        "sft_batch_size": None,
+        "sft_gradient_accumulation": None,
+        "cpt_learning_rate": None,
+        "sft_learning_rate": None,
+        "dataset_path": None,
+        "qa_path": None,
+        "cpt_checkpoint": None,
+        "sft_checkpoint": None,
+        "evaluate_test": False,
+    }
+    values.update(updates)
+    return argparse.Namespace(**values)
+
+
+def _patch_runner_before_training(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    exp2_config: dict,
+    args: argparse.Namespace,
+) -> tuple[list[str], Path]:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    base_model = tmp_path / "base-model"
+    base_model.mkdir()
+    reused: list[str] = []
+    monkeypatch.setattr(exp2_runner, "_parse_args", lambda: args)
+    monkeypatch.setattr(exp2_runner, "_infer_resume_inputs", lambda _: None)
+    monkeypatch.setattr(
+        exp2_runner,
+        "resolve_model_checkpoint",
+        lambda *_, **__: (base_model, 12),
+    )
+    monkeypatch.setattr(exp2_runner, "verify_checkpoint_layers", lambda *_, **__: {})
+    monkeypatch.setattr(exp2_runner, "_create_run_dir", lambda: run_dir)
+    monkeypatch.setattr(
+        exp2_runner,
+        "_write_resolved_config",
+        lambda **_: deepcopy(exp2_config),
+    )
+    monkeypatch.setattr(exp2_runner, "_write_json_atomic", lambda *_, **__: None)
+    monkeypatch.setattr(
+        exp2_runner,
+        "_reuse_stage",
+        lambda **kwargs: reused.append(kwargs["stage"]),
+    )
+    return reused, base_model
+
+
+def test_exp2_runner_reuses_compatible_pair_and_skips_both_generators(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    args = _runner_args()
+    reused, _ = _patch_runner_before_training(
+        monkeypatch, tmp_path, exp2_config, args
+    )
+    older_without_qa = {"bundle": tmp_path / "old", "T": 1, "N": 500}
+    paired_dataset = {"bundle": tmp_path / "paired", "T": 1, "N": 500}
+    qa = {
+        "root": tmp_path / "qa",
+        "sft_data_dir": tmp_path / "qa" / "target_sft",
+    }
+    monkeypatch.setattr(
+        exp2_runner,
+        "_find_existing_dataset_bundles",
+        lambda **_: [older_without_qa, paired_dataset],
+    )
+    monkeypatch.setattr(
+        exp2_runner,
+        "_find_existing_qa_bundle",
+        lambda **kwargs: qa
+        if kwargs["dataset_condition"] is paired_dataset
+        else None,
+    )
+    monkeypatch.setattr(
+        exp2_runner,
+        "_verify_dataset_bundle",
+        lambda path, **_: paired_dataset
+        if path == paired_dataset["bundle"]
+        else pytest.fail("wrapper did not select the compatible DB+QA pair"),
+    )
+    monkeypatch.setattr(exp2_runner, "_verify_qa_bundle", lambda *_, **__: qa)
+
+    executed: list[str] = []
+
+    def execute(**kwargs):
+        executed.append(kwargs["stage"])
+        if kwargs["stage"] == "cpt":
+            return tmp_path / "cpt"
+        raise _StopExp2Wrapper
+
+    monkeypatch.setattr(exp2_runner, "_execute_stage", execute)
+    monkeypatch.setattr(
+        exp2_runner,
+        "_run_command",
+        lambda *_: pytest.fail("a generation command was called"),
+    )
+    with pytest.raises(_StopExp2Wrapper):
+        exp2_runner.main()
+    assert args.dataset_path == paired_dataset["bundle"]
+    assert args.qa_path == qa["root"]
+    assert reused[:2] == ["generate_dataset", "generate_qa"]
+    assert "generate_dataset" not in executed
+    assert "generate_qa" not in executed
+
+
+def test_exp2_runner_reuses_db_and_generates_only_missing_qa(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    args = _runner_args()
+    reused, _ = _patch_runner_before_training(
+        monkeypatch, tmp_path, exp2_config, args
+    )
+    dataset = {"bundle": tmp_path / "dataset", "T": 1, "N": 500}
+    monkeypatch.setattr(
+        exp2_runner, "_find_existing_dataset_bundles", lambda **_: [dataset]
+    )
+    monkeypatch.setattr(exp2_runner, "_find_existing_qa_bundle", lambda **_: None)
+    monkeypatch.setattr(exp2_runner, "_verify_dataset_bundle", lambda *_, **__: dataset)
+    executed: list[str] = []
+
+    def execute(**kwargs):
+        executed.append(kwargs["stage"])
+        if kwargs["stage"] == "cpt":
+            return tmp_path / "cpt"
+        if kwargs["stage"] == "generate_qa":
+            return {
+                "root": tmp_path / "qa",
+                "sft_data_dir": tmp_path / "qa" / "target_sft",
+            }
+        raise _StopExp2Wrapper
+
+    monkeypatch.setattr(exp2_runner, "_execute_stage", execute)
+    with pytest.raises(_StopExp2Wrapper):
+        exp2_runner.main()
+    assert reused == ["generate_dataset"]
+    assert "generate_dataset" not in executed
+    assert "generate_qa" in executed
+
+
+def test_exp2_runner_explicit_dataset_and_qa_still_bypass_cache_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    dataset_path = tmp_path / "explicit-dataset"
+    qa_path = tmp_path / "explicit-qa"
+    args = _runner_args(dataset_path=dataset_path, qa_path=qa_path)
+    reused, _ = _patch_runner_before_training(
+        monkeypatch, tmp_path, exp2_config, args
+    )
+    condition = {"bundle": dataset_path.resolve(), "T": 1, "N": 500}
+    qa = {
+        "root": qa_path.resolve(),
+        "sft_data_dir": qa_path.resolve() / "target_sft",
+    }
+    monkeypatch.setattr(exp2_runner, "_verify_dataset_bundle", lambda *_, **__: condition)
+    monkeypatch.setattr(exp2_runner, "_verify_qa_bundle", lambda *_, **__: qa)
+    monkeypatch.setattr(
+        exp2_runner,
+        "_find_existing_dataset_bundles",
+        lambda **_: pytest.fail("dataset cache search replaced explicit path"),
+    )
+    monkeypatch.setattr(
+        exp2_runner,
+        "_find_existing_qa_bundle",
+        lambda **_: pytest.fail("QA cache search replaced explicit path"),
+    )
+
+    def execute(**kwargs):
+        if kwargs["stage"] == "cpt":
+            return tmp_path / "cpt"
+        raise _StopExp2Wrapper
+
+    monkeypatch.setattr(exp2_runner, "_execute_stage", execute)
+    with pytest.raises(_StopExp2Wrapper):
+        exp2_runner.main()
+    assert reused[:2] == ["generate_dataset", "generate_qa"]
