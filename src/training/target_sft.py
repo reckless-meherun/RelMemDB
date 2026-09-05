@@ -876,15 +876,33 @@ def summarize_target_sft_dev_metrics(
         raise ValueError("dev answer-only loss must be finite and non-negative")
     metrics = compute_evaluation_metrics(prediction_records)
 
-    def normalized_accuracy(group: dict[str, Any]) -> float:
+    def normalized_accuracy(
+        group: dict[str, Any], *, required: bool = False
+    ) -> float | None:
+        count = group.get("count")
         value = group.get("normalized_exact_match_accuracy")
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError("target-SFT dev metric group count is invalid")
+        if count == 0 and not required:
+            if value is not None:
+                raise ValueError(
+                    "target-SFT empty dev subgroup accuracy must be None"
+                )
+            return None
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or not 0.0 <= float(value) <= 1.0
+        ):
             raise ValueError("target-SFT dev normalized exact match is missing")
         return float(value)
 
     return {
         "dev_answer_only_loss": float(dev_answer_only_loss),
-        "dev_overall_normalized_exact_match": normalized_accuracy(metrics["overall"]),
+        "dev_overall_normalized_exact_match": normalized_accuracy(
+            metrics["overall"], required=True
+        ),
         **{
             f"dev_{hop}_normalized_exact_match": normalized_accuracy(
                 metrics["by_hop"][hop]

@@ -7,23 +7,292 @@ conditions without changing the canonical database or Experiment-1 semantics.
 
 ## Experiment 2: capacity boundary
 
-The four variables have precise meanings:
+The four experimental variables are:
 
-- **T** is the number of canonical tables explicitly selected with `--tables`.
-  Hidden parent tables needed for SQLite foreign keys do not increase T.
-- **N** is the number of unique exposed logical facts: every non-ID attribute
-  instance plus every FK relation instance whose source table is selected. IDs
-  never count. N is not a row, sentence, byte, character, or token count.
-- **L** is the actual transformer architecture depth. It is not a count of
-  unfrozen layers; CPT remains full-parameter training.
-- **M** is the selected registered pretrained model. `gpt2` is the default and
-  its native depth is L=12.
+- **T** — number of canonical tables explicitly selected with `--tables`.
+  Hidden/supporting parent tables required for foreign-key integrity do not
+  increase T.
+- **N** — number of unique exposed logical facts. Each non-ID attribute-value
+  instance counts as one fact, and each FK relation instance whose source table
+  is selected counts as one fact. IDs do not count.
+- **L** — actual transformer architecture depth. It is not the number of
+  unfrozen layers.
+- **M** — pretrained model identity. The current default is `gpt2`, with native
+  depth L=12.
 
-All commands are independent; Experiment 2 has no configured T/N sweep arrays.
-Generated datasets, QA bundles, runs, checkpoints, and results are timestamped
-and their manifests carry exact upstream paths and hashes.
+Experiment 2 has no fixed T/N sweep arrays. Every dataset, QA bundle, run,
+checkpoint, and evaluation carries provenance linking it to its exact upstream
+artifacts.
 
-Generate a baseline using the canonical chain count and observe N:
+### Repository paths
+
+Assuming the repository is located at:
+
+```text
+/home/hpc4090/meherun/relmemdb
+```
+
+the important Experiment-2 locations are:
+
+```text
+Config:
+  /home/hpc4090/meherun/relmemdb/configs/exp02_capacity_boundary.yaml
+
+Base GPT-2:
+  /home/hpc4090/meherun/relmemdb/models/base_models/gpt2
+
+Generated databases:
+  /home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp02_capacity_boundary/
+
+Generated QA:
+  /home/hpc4090/meherun/relmemdb/datasets/qa/exp02_capacity_boundary/
+
+Training runs:
+  /home/hpc4090/meherun/relmemdb/runs/exp02_capacity_boundary/
+
+Trained checkpoints:
+  /home/hpc4090/meherun/relmemdb/models/trained_models/
+
+Evaluation results:
+  /home/hpc4090/meherun/relmemdb/results/exp02_capacity_boundary/
+```
+
+## First Experiment-2 run: T=1, N=500, GPT-2 L12
+
+Use `continent` as the single exposed table.
+
+Start from the repository root:
+
+```bash
+cd /home/hpc4090/meherun/relmemdb
+set -euo pipefail
+
+ROOT=/home/hpc4090/meherun/relmemdb
+CONFIG=$ROOT/configs/exp02_capacity_boundary.yaml
+BASE_MODEL=$ROOT/models/base_models/gpt2
+```
+
+Verify the local GPT-2 checkpoint:
+
+```bash
+test -f "$BASE_MODEL/config.json" && echo "GPT-2 checkpoint ready: $BASE_MODEL"
+```
+
+### 1. Generate the T=1, N=500 database bundle
+
+```bash
+GEN_LOG=$(mktemp)
+
+python3 "$ROOT/scripts/generate_databases.py" \
+  --config "$CONFIG" \
+  --tables continent \
+  --fact-count 500 | tee "$GEN_LOG"
+
+DATASET_REL=$(sed -n 's/^Output: //p' "$GEN_LOG" | tail -1)
+DATASET_PATH="$ROOT/$DATASET_REL"
+rm "$GEN_LOG"
+
+echo "DATASET_PATH=$DATASET_PATH"
+```
+
+The generated bundle has the form:
+
+```text
+datasets/generated_databases/exp02_capacity_boundary/
+└── T01_N500_continent_<timestamp>/
+    ├── database.sqlite
+    ├── manifest.json
+    └── cpt/
+        ├── book_readable.txt
+        ├── train.txt
+        └── manifest.json
+```
+
+For `continent`, each chain contributes two logical facts. Therefore N=500
+corresponds to 250 chains.
+
+Verify the bundle:
+
+```bash
+test -f "$DATASET_PATH/database.sqlite"
+test -f "$DATASET_PATH/manifest.json"
+test -f "$DATASET_PATH/cpt/book_readable.txt"
+test -f "$DATASET_PATH/cpt/train.txt"
+test -f "$DATASET_PATH/cpt/manifest.json"
+```
+
+### 2. CPT-train GPT-2 at L=12
+
+```bash
+CPT_LOG=$(mktemp)
+
+python3 "$ROOT/scripts/train.py" \
+  --config "$CONFIG" \
+  --stage cpt \
+  --training-data-dir "$DATASET_PATH" \
+  --model gpt2 \
+  --layers 12 \
+  --source-checkpoint "$BASE_MODEL" 2>&1 | tee "$CPT_LOG"
+
+CPT_CHECKPOINT=$(sed -n 's/.*checkpoint=\(.*\)$/\1/p' "$CPT_LOG" | tail -1)
+rm "$CPT_LOG"
+
+echo "CPT_CHECKPOINT=$CPT_CHECKPOINT"
+```
+
+The checkpoint is created under:
+
+```text
+models/trained_models/
+└── gpt2_exp02_T01_N500_L12_<timestamp>/
+```
+
+Verify it:
+
+```bash
+test -f "$CPT_CHECKPOINT/config.json"
+test -f "$CPT_CHECKPOINT/training_metadata.json"
+```
+
+### 3. Generate evaluation and target-SFT QA
+
+```bash
+QA_LOG=$(mktemp)
+
+python3 "$ROOT/scripts/generate_target_sft_qa.py" \
+  --config "$CONFIG" \
+  --training-data-dir "$DATASET_PATH" | tee "$QA_LOG"
+
+QA_REL=$(sed -n 's/^Target-SFT QA output: //p' "$QA_LOG" | tail -1)
+QA_PATH="$ROOT/$QA_REL"
+SFT_DATA_DIR="$QA_PATH/target_sft"
+rm "$QA_LOG"
+
+echo "QA_PATH=$QA_PATH"
+echo "SFT_DATA_DIR=$SFT_DATA_DIR"
+```
+
+The generated QA structure is:
+
+```text
+datasets/qa/exp02_capacity_boundary/
+└── T01_N500_continent_<timestamp>/
+    ├── split_manifest.json
+    ├── validation/
+    ├── test/
+    └── target_sft/
+        ├── split_manifest.json
+        ├── train/
+        └── dev/
+```
+
+QA is generated only when all facts required to support the question are exposed.
+Unavailable hop categories are valid empty outputs.
+
+### 4. Evaluate CPT on validation
+
+```bash
+python3 "$ROOT/scripts/evaluate.py" \
+  --config "$CONFIG" \
+  --qa-data-dir "$QA_PATH" \
+  --checkpoint "$CPT_CHECKPOINT" \
+  --layers 12 \
+  --split validation
+```
+
+Experiment-2 results are written to:
+
+```text
+results/exp02_capacity_boundary/
+└── t_sweep/
+    └── T01/
+        └── n_sweep/
+            └── N500/
+                └── validation/
+                    └── eval_cpt/
+                        └── HH-MM-SS_DD-MM-YYYY/
+                            ├── evaluation_config.json
+                            ├── metrics.json
+                            └── predictions.jsonl
+```
+
+### 5. Train target SFT
+
+Use the exact `target_sft` directory generated above and the exact CPT
+checkpoint:
+
+```bash
+SFT_LOG=$(mktemp)
+
+python3 "$ROOT/scripts/train.py" \
+  --config "$CONFIG" \
+  --stage target-sft \
+  --sft-data-dir "$SFT_DATA_DIR" \
+  --source-checkpoint "$CPT_CHECKPOINT" \
+  --model gpt2 \
+  --layers 12 2>&1 | tee "$SFT_LOG"
+
+SFT_CHECKPOINT=$(sed -n 's/.*checkpoint=\(.*\)$/\1/p' "$SFT_LOG" | tail -1)
+rm "$SFT_LOG"
+
+echo "SFT_CHECKPOINT=$SFT_CHECKPOINT"
+```
+
+The resulting checkpoint is created under:
+
+```text
+models/trained_models/
+└── gpt2_exp02_T01_N500_L12_<timestamp>_sft/
+```
+
+### 6. Evaluate SFT on validation
+
+```bash
+python3 "$ROOT/scripts/evaluate.py" \
+  --config "$CONFIG" \
+  --qa-data-dir "$QA_PATH" \
+  --checkpoint "$SFT_CHECKPOINT" \
+  --layers 12 \
+  --split validation
+```
+
+The output is written to:
+
+```text
+results/exp02_capacity_boundary/
+└── t_sweep/
+    └── T01/
+        └── n_sweep/
+            └── N500/
+                └── validation/
+                    └── eval_sft/
+                        └── HH-MM-SS_DD-MM-YYYY/
+                            ├── evaluation_config.json
+                            ├── metrics.json
+                            └── predictions.jsonl
+```
+
+Evaluation authenticates the checkpoint against the QA condition before
+inference, including experiment identity, T, N, selected tables, database and
+manifest provenance, architecture depth, model identity, and CPT/SFT stage.
+
+### 7. Inspect the validation outputs
+
+```bash
+find "$ROOT/results/exp02_capacity_boundary/t_sweep/T01/n_sweep/N500/validation" \
+  -type f \
+  \( -name "metrics.json" -o -name "evaluation_config.json" \) \
+  | sort
+```
+
+Do not use the test split repeatedly while selecting T/N/model/layer conditions.
+Use validation for development and reserve test evaluation for the finalized
+experimental setup.
+
+## Generating other Experiment-2 conditions
+
+A baseline run can omit N. The canonical chain count is retained and N is
+computed from the selected tables:
 
 ```bash
 python3 scripts/generate_databases.py \
@@ -31,7 +300,7 @@ python3 scripts/generate_databases.py \
   --tables continent
 ```
 
-Generate a chosen valid N:
+For a chosen valid N:
 
 ```bash
 python3 scripts/generate_databases.py \
@@ -40,8 +309,7 @@ python3 scripts/generate_databases.py \
   --fact-count 1000
 ```
 
-Select two tables. Here each chain contributes five facts, so N must be divisible
-by five:
+For two selected tables:
 
 ```bash
 python3 scripts/generate_databases.py \
@@ -50,67 +318,59 @@ python3 scripts/generate_databases.py \
   --fact-count 5000
 ```
 
-The command prints the exact timestamped `<DATASET_PATH>`. CPT requires that
-bundle explicitly and defaults to local `models/base_models/gpt2` at native L=12:
+For `continent + country`, each chain contributes five exposed logical facts, so
+N must be exactly divisible by five.
 
-```bash
-python3 scripts/train.py \
-  --config configs/exp02_capacity_boundary.yaml \
-  --stage cpt \
-  --training-data-dir <DATASET_PATH>
+## Experiment-2 result organization
+
+Results currently organize the T/N capacity study as:
+
+```text
+results/exp02_capacity_boundary/
+└── t_sweep/
+    ├── T01/
+    │   └── n_sweep/
+    ├── T02/
+    │   └── n_sweep/
+    ├── T03/
+    │   └── n_sweep/
+    └── T04/
+        └── n_sweep/
 ```
 
-Use `--model <registered-name>` and `--layers <depth>` to override the defaults.
-Models resolve only from local checkpoints; the pipeline does not download a
-model during an experiment. A depth override must match the checkpoint's actual
-architecture.
+Actual evaluation runs dynamically create:
 
-Generate deterministic evaluation and target-SFT QA from the same exact bundle:
-
-```bash
-python3 scripts/generate_target_sft_qa.py \
-  --config configs/exp02_capacity_boundary.yaml \
-  --training-data-dir <DATASET_PATH>
+```text
+T{T:02d}/
+└── n_sweep/
+    └── N{exact_N}/
+        ├── validation/
+        │   ├── eval_cpt/
+        │   │   └── HH-MM-SS_DD-MM-YYYY/
+        │   └── eval_sft/
+        │       └── HH-MM-SS_DD-MM-YYYY/
+        └── test/
+            ├── eval_cpt/
+            └── eval_sft/
 ```
 
-Only selected attributes and selected-source relations can produce H0 support.
-H1–H3 records are emitted only when every relation and target attribute on the
-support path was exposed; unavailable hop files are valid empty JSONL files.
+Each timestamped evaluation directory contains:
 
-Train target SFT from an exact QA artifact and CPT checkpoint:
-
-```bash
-python3 scripts/train.py \
-  --config configs/exp02_capacity_boundary.yaml \
-  --stage target-sft \
-  --sft-data-dir <QA_PATH> \
-  --source-checkpoint <CPT_CHECKPOINT>
+```text
+evaluation_config.json
+metrics.json
+predictions.jsonl
 ```
 
-Evaluate with explicit QA and checkpoint paths:
+Model identity, architecture depth, selected tables, QA provenance, checkpoint
+provenance, and database hashes are stored inside `evaluation_config.json`
+rather than encoded in the result path.
 
-```bash
-python3 scripts/evaluate.py \
-  --config configs/exp02_capacity_boundary.yaml \
-  --qa-data-dir <QA_PATH> \
-  --checkpoint <CHECKPOINT> \
-  --split validation
-```
+## Experiment 1
 
-Experiment-2 evaluations authenticate the checkpoint stage from
-`training_metadata.json` and write to
-`results/exp02_capacity_boundary/t_sweep/T{T:02d}/n_sweep/N{N}/{split}/{eval_cpt|eval_sft}/{HH-MM-SS_DD-MM-YYYY}/`.
-Each timestamped directory contains `evaluation_config.json`, `metrics.json`, and
-`predictions.jsonl`; model, layer, and selected-table details remain in the
-evaluation configuration rather than the path.
+Existing Experiment-1 commands and path semantics remain unchanged.
 
-N controls model-independent database knowledge content. Training metadata
-separately records model/tokenizer identity, readable-book tokens, train tokens,
-sequence count, epochs, optimizer steps, and effective fact exposure.
-
-## Experiment 1 examples
-
-Existing Experiment-1 arguments and T/N meanings are unchanged. For example:
+Example CPT training:
 
 ```bash
 python3 scripts/train.py \
@@ -121,6 +381,8 @@ python3 scripts/train.py \
   --source-checkpoint models/base_models/gpt2 \
   --config configs/exp01_first_feasibility.yaml
 ```
+
+Example validation evaluation:
 
 ```bash
 python3 scripts/evaluate.py \
@@ -134,6 +396,8 @@ python3 scripts/evaluate.py \
 ```
 
 ## Tests
+
+Run the CPU test suite with:
 
 ```bash
 python3 -m pytest -q

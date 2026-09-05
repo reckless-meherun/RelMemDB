@@ -1,0 +1,137 @@
+{
+  "N": 500,
+  "T": 1,
+  "actual_logical_fact_count": 500,
+  "artifact_path": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp02_capacity_boundary/T01_N500_continent_20260905_120311_574721",
+  "attribute_fact_count": 500,
+  "attribute_facts_per_chain": 2,
+  "byte_count": 19209,
+  "canonical_schema_sha256": "85d17f3236cf3c1f22d9b67d8fe23ca35ffedf5106ab49f53933fc846b337cf8",
+  "canonical_source_database_manifest_sha256": "d59c01e009a3077311cca2ff63fc59afe50fa623d0f2284ef774be2f80b3e00b",
+  "canonical_source_database_sha256": "f35529b55eaa042d6257a2c613f12a64a3061885d6a169b8b3dc147ab6324217",
+  "character_count": 19209,
+  "configuration_sha256": "2733b306d43f04b1ea887fe2ba83d4f91a8a1abc9916038d916943c796b65874",
+  "cross_table_fk_edge_count": 11,
+  "cross_table_fk_instance_count": 2750,
+  "database_sha256": "e266a76206d4fcfafa22055d41fcc179fdc0bf876c8e66cae18168dc8901df74",
+  "experiment_mode": "selected_canonical_tables",
+  "experiment_name": "exp02_capacity_boundary",
+  "experimental_facts_per_chain": 2,
+  "exposed_row_count": 250,
+  "exposed_rows_per_table": {
+    "continent": 250
+  },
+  "facts_per_selected_chain": 2,
+  "format_version": 3,
+  "generated_schema_sha256": "85d17f3236cf3c1f22d9b67d8fe23ca35ffedf5106ab49f53933fc846b337cf8",
+  "generation_timestamp": "20260905_120311_574721",
+  "hidden_support_rows_per_table": {
+    "campus": 250,
+    "city": 250,
+    "country": 250,
+    "course": 250,
+    "course_offering": 250,
+    "department": 250,
+    "enrollment": 250,
+    "region": 250,
+    "school": 250,
+    "student": 250,
+    "subject": 250
+  },
+  "identifier_count": 250,
+  "identifier_field_count": 250,
+  "identifier_fields_per_chain": 1,
+  "identifiers_counted_as_experimental_facts": false,
+  "intra_table_fk_edge_count": 0,
+  "intra_table_fk_instance_count": 0,
+  "latent_positions": 12,
+  "logical_content_sha256": "da194d30b98d6d89bcd6804553133b1f8d755a493f095daff947ed630060743e",
+  "physical_row_count": 3000,
+  "physical_schema_column_count": 52,
+  "physical_schema_foreign_key_count": 11,
+  "physical_table_count": 12,
+  "position_partition": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ],
+    [
+      4
+    ],
+    [
+      5
+    ],
+    [
+      6
+    ],
+    [
+      7
+    ],
+    [
+      8
+    ],
+    [
+      9
+    ],
+    [
+      10
+    ],
+    [
+      11
+    ]
+  ],
+  "relation_fact_count": 0,
+  "relation_facts_per_chain": 0,
+  "requested_N": 500,
+  "row_counts": {
+    "continent": 250
+  },
+  "rows_per_table": {
+    "campus": 250,
+    "city": 250,
+    "continent": 250,
+    "country": 250,
+    "course": 250,
+    "course_offering": 250,
+    "department": 250,
+    "enrollment": 250,
+    "region": 250,
+    "school": 250,
+    "student": 250,
+    "subject": 250
+  },
+  "schema_column_count": 3,
+  "schema_foreign_key_count": 0,
+  "seed": 2025,
+  "selected_chain_count": 250,
+  "selected_positions": [
+    0
+  ],
+  "selected_tables": [
+    "continent"
+  ],
+  "sentence_count": 251,
+  "stored_value_count": 13000,
+  "support_tables": [
+    "country",
+    "region",
+    "city",
+    "campus",
+    "school",
+    "department",
+    "subject",
+    "course",
+    "course_offering",
+    "enrollment",
+    "student"
+  ],
+  "table_count": 1
+}

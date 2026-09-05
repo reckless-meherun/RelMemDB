@@ -388,6 +388,68 @@ def test_target_sft_dev_metric_summary_tracks_selection_breakdowns() -> None:
     }
 
 
+def test_target_sft_dev_metric_summary_accepts_t1_h0_attribute_only() -> None:
+    predictions = [
+        _scored_dev_record(
+            f"h0_attr_{index}",
+            0,
+            correct=index < 12,
+            fact_type="attribute",
+        )
+        for index in range(15)
+    ]
+    metrics = summarize_target_sft_dev_metrics(
+        predictions, dev_answer_only_loss=0.25
+    )
+    assert metrics == {
+        "dev_answer_only_loss": 0.25,
+        "dev_overall_normalized_exact_match": 0.8,
+        "dev_H0_normalized_exact_match": 0.8,
+        "dev_H1_normalized_exact_match": None,
+        "dev_H2_normalized_exact_match": None,
+        "dev_H3_normalized_exact_match": None,
+        "dev_H0_attribute_normalized_exact_match": 0.8,
+        "dev_H0_relation_normalized_exact_match": None,
+    }
+
+
+def test_target_sft_dev_metric_summary_rejects_empty_overall_predictions() -> None:
+    with pytest.raises(ValueError, match="empty prediction set"):
+        summarize_target_sft_dev_metrics([], dev_answer_only_loss=0.25)
+
+
+def test_target_sft_dev_metric_summary_rejects_malformed_populated_subgroup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    malformed = {
+        "overall": {"count": 1, "normalized_exact_match_accuracy": 1.0},
+        "by_hop": {
+            "H0": {"count": 1, "normalized_exact_match_accuracy": None},
+            **{
+                f"H{hop}": {
+                    "count": 0,
+                    "normalized_exact_match_accuracy": None,
+                }
+                for hop in range(1, 4)
+            },
+        },
+        "h0_by_fact_type": {
+            "attribute": {"count": 1, "normalized_exact_match_accuracy": 1.0},
+            "relation": {"count": 0, "normalized_exact_match_accuracy": None},
+        },
+    }
+    monkeypatch.setattr(
+        target_sft_module,
+        "compute_evaluation_metrics",
+        lambda _: malformed,
+    )
+    with pytest.raises(ValueError, match="normalized exact match is missing"):
+        summarize_target_sft_dev_metrics(
+            [_scored_dev_record("h0", 0, correct=True, fact_type="attribute")],
+            dev_answer_only_loss=0.25,
+        )
+
+
 def test_target_sft_dev_evaluation_uses_only_supplied_dev_records_and_greedy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -483,6 +545,32 @@ def test_target_sft_best_epoch_selection_and_tie_breaks() -> None:
     assert target_sft_epoch_is_better(_epoch(2, 0.5, 0.7), _epoch(1, 0.5, 0.8))
     assert not target_sft_epoch_is_better(_epoch(2, 0.5, 0.8), _epoch(1, 0.5, 0.8))
     assert target_sft_epoch_is_better(_epoch(1, 0.5, 0.8), _epoch(2, 0.5, 0.8))
+
+
+def test_target_sft_checkpoint_selection_ignores_subgroup_metrics() -> None:
+    incumbent = {
+        **_epoch(1, 0.5, 0.5),
+        "dev_H0_normalized_exact_match": 1.0,
+        "dev_H1_normalized_exact_match": 1.0,
+    }
+    higher_overall = {
+        **_epoch(2, 0.6, 0.9),
+        "dev_H0_normalized_exact_match": None,
+        "dev_H1_normalized_exact_match": None,
+    }
+    equal_overall_lower_loss = {
+        **_epoch(2, 0.5, 0.4),
+        "dev_H0_normalized_exact_match": None,
+        "dev_H1_normalized_exact_match": None,
+    }
+    equal_overall_loss_later = {
+        **_epoch(2, 0.5, 0.5),
+        "dev_H0_normalized_exact_match": 0.0,
+        "dev_H1_normalized_exact_match": 0.0,
+    }
+    assert target_sft_epoch_is_better(higher_overall, incumbent)
+    assert target_sft_epoch_is_better(equal_overall_lower_loss, incumbent)
+    assert not target_sft_epoch_is_better(equal_overall_loss_later, incumbent)
 
 
 def test_target_sft_patience_stops_after_three_completed_non_improving_epochs() -> None:
