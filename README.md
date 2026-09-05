@@ -43,12 +43,12 @@ A complete Experiment-2 run can now be launched with one command:
 ```bash
 python3 scripts/run_exp02.py \
   --tables continent \
-  --fact-count 500 \
+  --fact-count 1000 \
   --model gpt2 \
   --layers 12 \
   --base-model models/base_models/gpt2 \
-  --cpt-epochs 500 \
-  --sft-epochs 200 \
+  --cpt-epochs 200 \
+  --sft-epochs 150 \
   --cpt-batch-size 32 \
   --cpt-gradient-accumulation 1 \
 ```
