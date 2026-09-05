@@ -71,6 +71,169 @@ def _exp2_evaluation_stage(checkpoint_metadata: dict) -> str:
         ) from exc
 
 
+def _authenticate_exp2_checkpoint_condition(
+    *,
+    checkpoint_metadata: dict,
+    qa_manifest: dict,
+    actual_layers: int,
+    expected_model: str,
+) -> dict:
+    """Authenticate duplicated CPT/SFT condition metadata against Exp2 QA."""
+    experiment_condition = checkpoint_metadata.get("experiment_condition", {})
+    current_condition = checkpoint_metadata.get("current_database_condition", {})
+    provenance = checkpoint_metadata.get("provenance", {})
+    layer_metadata = checkpoint_metadata.get("checkpoint_layer_verification")
+    if not all(
+        isinstance(value, dict)
+        for value in (experiment_condition, current_condition, provenance)
+    ):
+        raise ValueError("checkpoint condition provenance must be JSON objects")
+    if not isinstance(layer_metadata, dict):
+        raise ValueError("checkpoint layer-verification metadata is missing")
+
+    def authenticate(
+        label: str,
+        expected: object,
+        candidates: list[tuple[str, object]],
+    ) -> None:
+        available = [(source, value) for source, value in candidates if value is not None]
+        if not available:
+            raise ValueError(f"checkpoint {label} provenance is missing")
+        for source, value in available:
+            if value != expected:
+                raise ValueError(
+                    f"checkpoint {label} mismatch at {source}: "
+                    f"expected {expected!r}, found {value!r}"
+                )
+
+    qa_experiment = qa_manifest.get("experiment_name")
+    if qa_experiment != "exp02_capacity_boundary":
+        raise ValueError("QA experiment provenance is not exp02_capacity_boundary")
+    qa_table_count = qa_manifest.get("T")
+    qa_fact_count = qa_manifest.get("requested_N")
+    qa_selected_tables = qa_manifest.get("selected_tables")
+    qa_database_hash = qa_manifest.get("source_database_sha256")
+    qa_database_manifest_hash = qa_manifest.get("source_database_manifest_sha256")
+    qa_dataset_manifest_hash = qa_manifest.get("source_dataset_manifest_sha256")
+    if qa_dataset_manifest_hash is None:
+        qa_dataset_manifest_hash = qa_database_manifest_hash
+    if qa_database_manifest_hash != qa_dataset_manifest_hash:
+        raise ValueError(
+            "QA source database/source dataset manifest provenance is inconsistent"
+        )
+
+    authenticate(
+        "experiment",
+        qa_experiment,
+        [
+            ("experiment", checkpoint_metadata.get("experiment")),
+            ("provenance.experiment_name", provenance.get("experiment_name")),
+        ],
+    )
+    authenticate(
+        "T",
+        qa_table_count,
+        [
+            ("T", checkpoint_metadata.get("T")),
+            ("experiment_condition.table_count", experiment_condition.get("table_count")),
+            ("experiment_condition.T", experiment_condition.get("T")),
+            ("current_database_condition.T", current_condition.get("T")),
+            ("provenance.T", provenance.get("T")),
+        ],
+    )
+    authenticate(
+        "N",
+        qa_fact_count,
+        [
+            ("N", checkpoint_metadata.get("N")),
+            ("experiment_condition.fact_count", experiment_condition.get("fact_count")),
+            ("experiment_condition.N", experiment_condition.get("N")),
+            ("current_database_condition.N", current_condition.get("N")),
+            ("provenance.N", provenance.get("N")),
+        ],
+    )
+    authenticate(
+        "selected_tables",
+        qa_selected_tables,
+        [
+            (
+                "experiment_condition.selected_tables",
+                experiment_condition.get("selected_tables"),
+            ),
+            (
+                "current_database_condition.selected_tables",
+                current_condition.get("selected_tables"),
+            ),
+            ("provenance.selected_tables", provenance.get("selected_tables")),
+        ],
+    )
+    authenticate(
+        "source_database_sha256",
+        qa_database_hash,
+        [
+            (
+                "current_database_condition.source_database_sha256",
+                current_condition.get("source_database_sha256"),
+            ),
+            ("provenance.source_database_sha256", provenance.get("source_database_sha256")),
+        ],
+    )
+    authenticate(
+        "source database manifest hash",
+        qa_database_manifest_hash,
+        [
+            (
+                "current_database_condition.source_database_manifest_sha256",
+                current_condition.get("source_database_manifest_sha256"),
+            ),
+            (
+                "provenance.database_manifest_sha256",
+                provenance.get("database_manifest_sha256"),
+            ),
+            (
+                "provenance.source_database_manifest_sha256",
+                provenance.get("source_database_manifest_sha256"),
+            ),
+            (
+                "provenance.source_dataset_manifest_sha256",
+                provenance.get("source_dataset_manifest_sha256"),
+            ),
+        ],
+    )
+    authenticate(
+        "layer count",
+        actual_layers,
+        [
+            ("L", checkpoint_metadata.get("L")),
+            ("experiment_condition.layers", experiment_condition.get("layers")),
+            ("current_database_condition.layers", current_condition.get("layers")),
+            (
+                "checkpoint_layer_verification.requested_layers",
+                layer_metadata.get("requested_layers"),
+            ),
+            (
+                "checkpoint_layer_verification.actual_layers",
+                layer_metadata.get("actual_layers"),
+            ),
+        ],
+    )
+    authenticate(
+        "model identity",
+        expected_model,
+        [("model", checkpoint_metadata.get("model"))],
+    )
+    return {
+        "T": qa_table_count,
+        "N": qa_fact_count,
+        "selected_tables": qa_selected_tables,
+        "source_database_sha256": qa_database_hash,
+        "source_database_manifest_sha256": qa_database_manifest_hash,
+        "source_dataset_manifest_sha256": qa_dataset_manifest_hash,
+        "L": actual_layers,
+        "M": expected_model,
+    }
+
+
 def _reserve_exp2_result_directory(
     *,
     table_count: int,
@@ -234,10 +397,6 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
     )
     layers = actual_layers if args.layers is None else args.layers
     layer_provenance = verify_checkpoint_layers(checkpoint, layers)
-    qa_records, qa_provenance = load_verified_qa_split(
-        qa_root / args.split, split=args.split,
-        expected_table_count=table_count, expected_fact_count=fact_count,
-    )
     metadata_path = checkpoint / "training_metadata.json"
     if not metadata_path.is_file():
         raise FileNotFoundError(
@@ -245,16 +404,19 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
         )
     checkpoint_metadata = read_json(metadata_path)
     evaluation_stage = _exp2_evaluation_stage(checkpoint_metadata)
-    current = checkpoint_metadata.get("current_database_condition", {})
-    cpt_provenance = checkpoint_metadata.get("provenance", {})
-    recorded_database_hash = current.get(
-        "source_database_sha256", cpt_provenance.get("source_database_sha256")
+    condition_provenance = _authenticate_exp2_checkpoint_condition(
+        checkpoint_metadata=checkpoint_metadata,
+        qa_manifest=root_manifest,
+        actual_layers=layer_provenance["actual_layers"],
+        expected_model=config["model"]["name"],
     )
-    if recorded_database_hash and recorded_database_hash != root_manifest.get("source_database_sha256"):
-        raise ValueError("checkpoint and QA dataset source database provenance mismatch")
+    qa_records, qa_provenance = load_verified_qa_split(
+        qa_root / args.split, split=args.split,
+        expected_table_count=table_count, expected_fact_count=fact_count,
+    )
     evaluation = config["evaluation"]
     batch_size = evaluation["batch_size"] if args.batch_size is None else args.batch_size
-    model_name = checkpoint_metadata.get("model", config["model"]["name"])
+    model_name = condition_provenance["M"]
     output_dir, timestamp = _reserve_exp2_result_directory(
         table_count=table_count,
         fact_count=fact_count,

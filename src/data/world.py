@@ -85,6 +85,33 @@ _COURSE_SUBTITLES = (
     "Research Seminar", "Theory and Practice",
 )
 
+_NATURAL_NAME_NAMESPACE_CAPACITIES = {
+    "continent_name": (
+        len(_DIRECTIONS) * len(_MODIFIERS) * len(_STEMS) * len(_LANDFORMS)
+    ),
+    "country_name": (
+        len(_MODIFIERS)
+        * len(_STEMS)
+        * len(_COUNTRY_SUFFIXES)
+        * len(_GOVERNMENTS)
+    ),
+    "region_name": (
+        len(_DIRECTIONS) * len(_MODIFIERS) * len(_STEMS) * len(_LANDFORMS)
+    ),
+    "city_name": len(_MODIFIERS) * len(_STEMS) * len(_CITY_SUFFIXES),
+    "campus_name": len(_STEMS) * len(_MODIFIERS) * len(_CAMPUS_SITES),
+    "school_name": len(_STEMS) * len(_DISCIPLINES) * len(_TOPICS),
+    "department_name": len(_STEMS) * len(_DISCIPLINES) * len(_TOPICS),
+    "subject_name": len(_MODIFIERS) * len(_TOPICS) * len(_DISCIPLINES),
+    "course_title": (
+        len(_MODIFIERS)
+        * len(_TOPICS)
+        * len(_COURSE_SUBTITLES)
+        * len(_DISCIPLINES)
+    ),
+    "full_name": len(_FIRST_NAMES) * 26 * len(_LAST_NAMES),
+}
+
 
 def _stable_number(seed: int, *parts: object) -> int:
     payload = "|".join(
@@ -105,18 +132,30 @@ def _identifier(
     used_identifiers: set[str],
     used_numeric_suffixes: set[str],
 ) -> str:
-    for attempt in range(IDENTIFIER_MODULUS):
-        number = _stable_number(
-            seed, "entity-id", position, chain_index, attempt
-        ) % IDENTIFIER_MODULUS
-        suffix = f"{number:06d}"
-        identifier = f"{prefix}{suffix}"
-        if identifier in used_identifiers or suffix in used_numeric_suffixes:
-            continue
-        used_identifiers.add(identifier)
-        used_numeric_suffixes.add(suffix)
-        return identifier
-    raise RuntimeError("identifier namespace is exhausted")
+    if len(used_numeric_suffixes) < IDENTIFIER_MODULUS:
+        for attempt in range(IDENTIFIER_MODULUS):
+            number = _stable_number(
+                seed, "entity-id", position, chain_index, attempt
+            ) % IDENTIFIER_MODULUS
+            suffix = f"{number:06d}"
+            identifier = f"{prefix}{suffix}"
+            if identifier in used_identifiers or suffix in used_numeric_suffixes:
+                continue
+            used_identifiers.add(identifier)
+            used_numeric_suffixes.add(suffix)
+            return identifier
+    # The historical six-digit namespace is finite. Extend it only once every
+    # six-digit suffix has genuinely been consumed; the chain/position ordinal
+    # is deterministic, injective, and has no fixed upper bound.
+    suffix = str(
+        IDENTIFIER_MODULUS + chain_index * len(SEMANTIC_ENTITY_SPECS) + position
+    )
+    identifier = f"{prefix}{suffix}"
+    if identifier in used_identifiers or suffix in used_numeric_suffixes:
+        raise RuntimeError("deterministic extended identifier collision")
+    used_identifiers.add(identifier)
+    used_numeric_suffixes.add(suffix)
+    return identifier
 
 
 def _natural_name_candidate(
@@ -165,13 +204,25 @@ def _natural_name_candidate(
 def _unique_natural_name(
     field: str, seed: int, chain_index: int, used_names: set[str]
 ) -> str:
-    for attempt in range(IDENTIFIER_MODULUS):
-        candidate = _natural_name_candidate(field, seed, chain_index, attempt)
-        if candidate in used_names:
-            continue
-        used_names.add(candidate)
-        return candidate
-    raise RuntimeError(f"natural-name namespace is exhausted for {field}")
+    if len(used_names) < _NATURAL_NAME_NAMESPACE_CAPACITIES[field]:
+        for attempt in range(IDENTIFIER_MODULUS):
+            candidate = _natural_name_candidate(field, seed, chain_index, attempt)
+            if candidate in used_names:
+                continue
+            used_names.add(candidate)
+            return candidate
+    # Readable combinatorial names are finite. Disambiguate only after that
+    # field's complete base namespace has genuinely been consumed.
+    candidate = (
+        f"{_natural_name_candidate(field, seed, chain_index, 0)} "
+        f"Record {chain_index + 1}"
+    )
+    if candidate in used_names:
+        raise RuntimeError(
+            f"deterministic extended natural-name collision for {field}"
+        )
+    used_names.add(candidate)
+    return candidate
 
 
 def canonical_table_names() -> tuple[str, ...]:
@@ -248,43 +299,9 @@ def build_world_for_chain_count(
     used_natural_names = {field: set() for field in NATURAL_IDENTIFIER_FIELDS.values()}
     chains: list[dict[str, Any]] = []
     for index in range(chain_count):
-        if index < 1_000:
-            chain = _build_chain(
-                seed, index, used_identifiers, used_numeric_suffixes, used_natural_names
-            )
-        else:
-            # Preserve all historical prefixes, then enter an unbounded, injective
-            # namespace.  Natural anchors remain readable and globally unique.
-            entities = []
-            for position, spec in enumerate(SEMANTIC_ENTITY_SPECS):
-                attributes = []
-                natural_field = NATURAL_IDENTIFIER_FIELDS.get(spec["entity_type"])
-                for field, _ in spec["attributes"]:
-                    value = (
-                        f"{_natural_name_candidate(field, seed, index, 0)} Record {index + 1}"
-                        if field == natural_field
-                        else _attribute_value(field, seed, index)
-                    )
-                    attributes.append({"name": field, "value": value})
-                entities.append(
-                    {
-                        "position": position,
-                        "entity_type": spec["entity_type"],
-                        "entity_id": f"{spec['id_prefix']}{1_000_000 + index * len(SEMANTIC_ENTITY_SPECS) + position}",
-                        "attributes": attributes,
-                    }
-                )
-            relations = [
-                {
-                    "relation_type": "references_parent",
-                    "source_position": position,
-                    "target_position": position - 1,
-                    "source_entity_id": entities[position]["entity_id"],
-                    "target_entity_id": entities[position - 1]["entity_id"],
-                }
-                for position in range(1, len(entities))
-            ]
-            chain = {"chain_index": index, "entities": entities, "relations": relations}
+        chain = _build_chain(
+            seed, index, used_identifiers, used_numeric_suffixes, used_natural_names
+        )
         chains.append(chain)
     _validate_world_uniqueness(chains)
     return {

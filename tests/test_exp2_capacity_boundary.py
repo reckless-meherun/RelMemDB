@@ -1,4 +1,5 @@
 import argparse
+from copy import deepcopy
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from data.materialize import (
 from data.qa import generate_qa_candidates, load_verified_semantic_chains
 from data.serialize import database_schema_sha256, serialize_database_cpt
 from data.world import (
+    NATURAL_IDENTIFIER_FIELDS,
     SEMANTIC_ENTITY_SPECS,
     build_world_for_chain_count,
     facts_per_selected_chain,
@@ -27,7 +29,7 @@ from experiment import resolve_model_checkpoint, verify_checkpoint_layers
 from training.cpt import build_cpt_training_plan
 from training.target_sft import build_target_sft_training_plan
 from utils.hashing import hash_file
-from utils.io import read_text, write_json
+from utils.io import read_json, read_text, write_json
 from utils.paths import (
     EXP02_RESULTS_DIR,
     exp2_condition_label,
@@ -133,6 +135,80 @@ def test_exp2_determinism_and_nested_prefixes(exp2_config: dict) -> None:
     assert large["chains"][:7] == small["chains"]
 
 
+def test_exp2_world_is_stable_across_the_old_1000_chain_boundary(
+    exp2_config: dict,
+) -> None:
+    world_999 = build_world_for_chain_count(exp2_config, 999)
+    world_1000 = build_world_for_chain_count(exp2_config, 1000)
+    world_1002 = build_world_for_chain_count(exp2_config, 1002)
+    repeated = build_world_for_chain_count(exp2_config, 1002)
+    assert world_1000["chains"][:999] == world_999["chains"]
+    assert world_1002["chains"][:1000] == world_1000["chains"]
+    assert repeated == world_1002
+
+    identifiers = [
+        entity["entity_id"]
+        for chain in world_1002["chains"]
+        for entity in chain["entities"]
+    ]
+    assert len(identifiers) == len(set(identifiers))
+    assert all(
+        len(entity["entity_id"][3:]) == 6
+        for chain in world_1002["chains"][998:]
+        for entity in chain["entities"]
+    )
+    for position, spec in enumerate(SEMANTIC_ENTITY_SPECS):
+        natural_name = NATURAL_IDENTIFIER_FIELDS.get(spec["entity_type"])
+        if natural_name is None:
+            continue
+        values = {
+            next(
+                attribute["value"]
+                for attribute in chain["entities"][position]["attributes"]
+                if attribute["name"] == natural_name
+            )
+            for chain in world_1002["chains"]
+        }
+        assert len(values) == 1002
+
+
+def test_exp2_world_scales_only_at_genuine_natural_namespace_capacity(
+    exp2_config: dict,
+) -> None:
+    world = build_world_for_chain_count(exp2_config, 2600)
+    city_position = next(
+        index
+        for index, spec in enumerate(SEMANTIC_ENTITY_SPECS)
+        if spec["entity_type"] == "city"
+    )
+    city_names = [
+        next(
+            attribute["value"]
+            for attribute in chain["entities"][city_position]["attributes"]
+            if attribute["name"] == "city_name"
+        )
+        for chain in world["chains"]
+    ]
+    assert len(city_names) == len(set(city_names)) == 2600
+    assert all(" Record " not in name for name in city_names[:2560])
+    assert all(" Record " in name for name in city_names[2560:])
+
+
+def test_exp2_world_preserves_existing_canonical_prefix(exp2_config: dict) -> None:
+    canonical_world = read_json(
+        Path(__file__).resolve().parents[1]
+        / "datasets"
+        / "generated_databases"
+        / "exp01_first_feasibility"
+        / "master_world"
+        / "world.json"
+    )
+    generated = build_world_for_chain_count(
+        exp2_config, canonical_world["construction"]["total_chains"]
+    )
+    assert generated["chains"] == canonical_world["chains"]
+
+
 def test_exp2_qa_uses_only_exposed_paths(tmp_path: Path, exp2_config: dict) -> None:
     bundle = _bundle(tmp_path, exp2_config, ["continent", "country"], 5)
     chains, manifest = load_verified_semantic_chains(
@@ -207,6 +283,71 @@ def test_exp2_evaluation_stage_comes_from_checkpoint_metadata() -> None:
         )
 
 
+def _exp2_qa_manifest() -> dict:
+    return {
+        "experiment_name": "exp02_capacity_boundary",
+        "T": 2,
+        "requested_N": 1000,
+        "selected_tables": ["continent", "country"],
+        "source_database_sha256": "a" * 64,
+        "source_database_manifest_sha256": "b" * 64,
+        "source_dataset_manifest_sha256": "b" * 64,
+    }
+
+
+def _exp2_checkpoint_metadata(stage: str) -> dict:
+    metadata = {
+        "experiment": "exp02_capacity_boundary",
+        "stage": stage,
+        "model": "gpt2",
+        "T": 2,
+        "N": 1000,
+        "L": 12,
+        "checkpoint_layer_verification": {
+            "requested_layers": 12,
+            "actual_layers": 12,
+        },
+    }
+    if stage == "cpt":
+        metadata.update(
+            {
+                "experiment_condition": {
+                    "table_count": 2,
+                    "fact_count": 1000,
+                    "layers": 12,
+                    "selected_tables": ["continent", "country"],
+                },
+                "provenance": {
+                    "experiment_name": "exp02_capacity_boundary",
+                    "T": 2,
+                    "N": 1000,
+                    "selected_tables": ["continent", "country"],
+                    "source_database_sha256": "a" * 64,
+                    "database_manifest_sha256": "b" * 64,
+                },
+            }
+        )
+    else:
+        metadata.update(
+            {
+                "current_database_condition": {
+                    "T": 2,
+                    "N": 1000,
+                    "layers": 12,
+                    "selected_tables": ["continent", "country"],
+                    "source_database_sha256": "a" * 64,
+                    "source_database_manifest_sha256": "b" * 64,
+                },
+                "provenance": {
+                    "selected_tables": ["continent", "country"],
+                    "source_database_sha256": "a" * 64,
+                    "source_database_manifest_sha256": "b" * 64,
+                },
+            }
+        )
+    return metadata
+
+
 def test_exp2_result_reservation_never_reuses_timestamp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -240,33 +381,29 @@ def test_exp2_result_reservation_never_reuses_timestamp(
     assert first != second
 
 
+@pytest.mark.parametrize(
+    ("checkpoint_stage", "evaluation_stage"),
+    [("cpt", "eval_cpt"), ("target-sft", "eval_sft")],
+)
 def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exp2_config: dict,
+    checkpoint_stage: str,
+    evaluation_stage: str,
 ) -> None:
     qa_root = tmp_path / "qa"
     qa_root.mkdir()
     write_json(
         qa_root / "split_manifest.json",
-        {
-            "experiment_name": "exp02_capacity_boundary",
-            "T": 2,
-            "requested_N": 1000,
-            "selected_tables": ["continent", "country"],
-            "source_database_sha256": "a" * 64,
-            "source_database_manifest_sha256": "b" * 64,
-        },
+        _exp2_qa_manifest(),
     )
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     write_json(checkpoint / "config.json", {"model_type": "gpt2", "n_layer": 12})
     write_json(
         checkpoint / "training_metadata.json",
-        {
-            "experiment": "exp02_capacity_boundary",
-            "stage": "cpt",
-            "model": "gpt2",
-            "provenance": {"source_database_sha256": "a" * 64},
-        },
+        _exp2_checkpoint_metadata(checkpoint_stage),
     )
     output_dir = (
         tmp_path
@@ -277,7 +414,7 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
         / "n_sweep"
         / "N1000"
         / "validation"
-        / "eval_cpt"
+        / evaluation_stage
         / "12-34-56_05-09-2026"
     )
     captured: dict[str, object] = {}
@@ -328,7 +465,7 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
         "table_count": 2,
         "fact_count": 1000,
         "split": "validation",
-        "stage": "eval_cpt",
+        "stage": evaluation_stage,
     }
     assert {path.name for path in output_dir.iterdir()} == {
         "evaluation_config.json",
@@ -338,8 +475,90 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
     evaluation_config = __import__("json").loads(
         (output_dir / "evaluation_config.json").read_text(encoding="utf-8")
     )
-    assert evaluation_config["checkpoint_stage"] == "cpt"
-    assert evaluation_config["evaluation_stage"] == "eval_cpt"
+    assert evaluation_config["checkpoint_stage"] == checkpoint_stage
+    assert evaluation_config["evaluation_stage"] == evaluation_stage
+
+
+def _mutate_checkpoint_condition(metadata: dict, field: str) -> None:
+    condition = (
+        metadata["experiment_condition"]
+        if metadata["stage"] == "cpt"
+        else metadata["current_database_condition"]
+    )
+    provenance = metadata["provenance"]
+    if field == "selected_tables":
+        condition[field] = ["continent", "region"]
+        provenance[field] = ["continent", "region"]
+    elif field == "T":
+        metadata["T"] = 3
+        condition["table_count" if metadata["stage"] == "cpt" else "T"] = 3
+        if "T" in provenance:
+            provenance["T"] = 3
+    elif field == "N":
+        metadata["N"] = 1005
+        condition["fact_count" if metadata["stage"] == "cpt" else "N"] = 1005
+        if "N" in provenance:
+            provenance["N"] = 1005
+    else:
+        if metadata["stage"] == "cpt":
+            provenance["database_manifest_sha256"] = "e" * 64
+        else:
+            condition["source_database_manifest_sha256"] = "e" * 64
+            provenance["source_database_manifest_sha256"] = "e" * 64
+
+
+@pytest.mark.parametrize("checkpoint_stage", ["cpt", "target-sft"])
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("selected_tables", "selected_tables mismatch"),
+        ("T", "checkpoint T mismatch"),
+        ("N", "checkpoint N mismatch"),
+        ("manifest", "source database manifest hash mismatch"),
+    ],
+)
+def test_exp2_evaluation_rejects_checkpoint_qa_condition_mismatch_before_inference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exp2_config: dict,
+    checkpoint_stage: str,
+    field: str,
+    message: str,
+) -> None:
+    qa_root = tmp_path / "qa"
+    qa_root.mkdir()
+    write_json(qa_root / "split_manifest.json", _exp2_qa_manifest())
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    write_json(checkpoint / "config.json", {"model_type": "gpt2", "n_layer": 12})
+    checkpoint_metadata = deepcopy(_exp2_checkpoint_metadata(checkpoint_stage))
+    _mutate_checkpoint_condition(checkpoint_metadata, field)
+    write_json(checkpoint / "training_metadata.json", checkpoint_metadata)
+
+    monkeypatch.setattr(
+        evaluate_script,
+        "load_verified_qa_split",
+        lambda *_, **__: pytest.fail("QA records loaded before provenance rejection"),
+    )
+    monkeypatch.setattr(
+        evaluate_script,
+        "evaluate_with_local_checkpoint",
+        lambda *_, **__: pytest.fail("model inference ran before provenance rejection"),
+    )
+    with pytest.raises(ValueError, match=message):
+        evaluate_script._evaluate_exp2(
+            argparse.Namespace(
+                qa_data_dir=qa_root,
+                table_count=None,
+                fact_count=None,
+                layers=None,
+                checkpoint=checkpoint,
+                split="validation",
+                batch_size=None,
+                run_name=None,
+            ),
+            exp2_config,
+        )
 
 
 def test_exp2_explicit_architecture_depth_override(tmp_path: Path) -> None:
