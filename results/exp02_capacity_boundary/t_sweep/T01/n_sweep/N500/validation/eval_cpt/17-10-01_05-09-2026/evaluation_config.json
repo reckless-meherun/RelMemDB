@@ -1,0 +1,50 @@
+{
+  "L": 12,
+  "M": "gpt2",
+  "N": 500,
+  "T": 1,
+  "batch_size": 32,
+  "checkpoint_layer_verification": {
+    "actual_layers": 12,
+    "checkpoint_config_sha256": "31e382ea26ab70a8e03dff0e13d989b26de2e30f72fcba5ea4e22cba2ff32c68",
+    "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp02_T01_N500_L12_20260905_170835_521486",
+    "requested_layers": 12
+  },
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp02_T01_N500_L12_20260905_170835_521486",
+  "checkpoint_stage": "cpt",
+  "checkpoint_training_metadata_sha256": "73c0fd1c487efa8d0260c1c9ee218042b6c1a9222d11d60f9f91940dd897946b",
+  "context_length": 256,
+  "decoding": {
+    "do_sample": false,
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "evaluation_stage": "eval_cpt",
+  "evaluation_timestamp": "17-10-01_05-09-2026",
+  "experiment_name": "exp02_capacity_boundary",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp02_T01_N500_L12_20260905_170835_521486",
+  "primary_metric": "normalized_exact_match",
+  "prompt_format": "Question:\n{question}\n\nAnswer:",
+  "qa_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/qa/exp02_capacity_boundary/T01_N500_continent_20260905_171001_816176",
+  "qa_input_hashes": {
+    "H0": "9753b13c6b186df658f2bb2b076ef343dfb8d74c2ad1f4cc1bd2ac6d8af7ac25",
+    "H1": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H2": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H3": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "qa_manifest_sha256": "d039fd10c6bbff8c9d57ddbfc367191bcd5ab3105990aa01de3081337ee7ea9c",
+  "qa_record_count": 50,
+  "qa_split_manifest_sha256": "86abc31c83bff76772e639930bbc24302328d07dae914095a38cef9f34f9b624",
+  "run_name": null,
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "source_database_manifest_sha256": "6aae2a6ac9024c177b683407efb9cc0c9405baf561bb8353586d2703c4dd96da",
+  "source_database_sha256": "e266a76206d4fcfafa22055d41fcc179fdc0bf876c8e66cae18168dc8901df74",
+  "source_dataset_manifest_sha256": "6aae2a6ac9024c177b683407efb9cc0c9405baf561bb8353586d2703c4dd96da",
+  "split": "validation",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp02_T01_N500_L12_20260905_170835_521486",
+  "zero_context": true
+}

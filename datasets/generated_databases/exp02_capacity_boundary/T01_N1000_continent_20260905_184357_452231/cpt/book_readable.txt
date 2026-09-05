@@ -1,0 +1,1005 @@
+The Academic Database Book
+
+A continent represents a geographic area and has a name and climate band.
+
+Continent Records
+
+Eastern Ancient Oak Isles is a continent with a polar climate band.
+
+Eastern Grand Juniper Basin is a continent with a tropical climate band.
+
+Northern Sunlit Falcon Highlands is a continent with a tropical climate band.
+
+Eastern New Elm Reach is a continent with a subtropical climate band.
+
+Southern Ancient Silver Isles is a continent with a polar climate band.
+
+Upper New Glen Reach is a continent with a cool temperate climate band.
+
+Northern Sunlit Maris Coast is a continent with a tropical climate band.
+
+Eastern Emerald Dunmore Highlands is a continent with a subtropical climate band.
+
+Eastern Grand Silver Basin is a continent with a subtropical climate band.
+
+Western Golden Harbor Isles is a continent with a tropical climate band.
+
+Central Grand Pine Shores is a continent with a warm temperate climate band.
+
+Lower Emerald Elm Coast is a continent with a cool temperate climate band.
+
+Western Quiet Maris Uplands is a continent with a tropical climate band.
+
+Upper Sapphire Linden Uplands is a continent with a cool temperate climate band.
+
+Western Verdant Linden Uplands is a continent with a subtropical climate band.
+
+Northern Emerald Northwind Reach is a continent with a warm temperate climate band.
+
+Eastern Bright Northwind Rim is a continent with a cool temperate climate band.
+
+Northern Blue Arden Shores is a continent with a subtropical climate band.
+
+Lower Golden Harbor Coast is a continent with a warm temperate climate band.
+
+Lower Grand Redwood Shores is a continent with a cool temperate climate band.
+
+Western New Quartz Coast is a continent with a tropical climate band.
+
+Northern Royal Redwood Basin is a continent with a warm temperate climate band.
+
+Southern Highland Elm Arc is a continent with a warm temperate climate band.
+
+Lower Quiet Harbor Isles is a continent with a tropical climate band.
+
+Eastern Windward Elm Basin is a continent with a warm temperate climate band.
+
+Northern New Oak Uplands is a continent with a warm temperate climate band.
+
+Northern Ancient Northwind Reach is a continent with a polar climate band.
+
+Northern New Dunmore Highlands is a continent with a cool temperate climate band.
+
+Northern Blue Glen Isles is a continent with a subtropical climate band.
+
+Northern Sapphire Elm Shores is a continent with a cool temperate climate band.
+
+Lower Sapphire Coral Highlands is a continent with a polar climate band.
+
+Lower Verdant Juniper Shores is a continent with a cool temperate climate band.
+
+Southern Ancient Briar Arc is a continent with a polar climate band.
+
+Upper Sapphire Cedar Uplands is a continent with a polar climate band.
+
+Western Highland Juniper Shores is a continent with a warm temperate climate band.
+
+Northern Ancient Cedar Rim is a continent with a polar climate band.
+
+Western Grand Elm Coast is a continent with a subtropical climate band.
+
+Northern Highland Cedar Arc is a continent with a polar climate band.
+
+Southern Verdant Linden Rim is a continent with a warm temperate climate band.
+
+Western Highland Linden Uplands is a continent with a tropical climate band.
+
+Southern Golden Glen Basin is a continent with a tropical climate band.
+
+Eastern Quiet Coral Reach is a continent with a warm temperate climate band.
+
+Upper Golden Cedar Coast is a continent with a polar climate band.
+
+Upper Verdant Willow Plateau is a continent with a cool temperate climate band.
+
+Lower Windward Northwind Isles is a continent with a cool temperate climate band.
+
+Northern Sunlit Juniper Highlands is a continent with a warm temperate climate band.
+
+Upper Grand Oak Rim is a continent with a tropical climate band.
+
+Lower Ancient Silver Isles is a continent with a cool temperate climate band.
+
+Eastern Sapphire Briar Uplands is a continent with a cool temperate climate band.
+
+Central New Maris Uplands is a continent with a tropical climate band.
+
+Upper Verdant Silver Basin is a continent with a tropical climate band.
+
+Western Sapphire Quartz Coast is a continent with a cool temperate climate band.
+
+Southern Sapphire Arden Basin is a continent with a subtropical climate band.
+
+Western Windward Redwood Arc is a continent with a polar climate band.
+
+Southern Verdant Alder Plateau is a continent with a subtropical climate band.
+
+Lower Sunlit Arden Shores is a continent with a cool temperate climate band.
+
+Western Ancient Linden Shores is a continent with a cool temperate climate band.
+
+Lower Windward Oak Reach is a continent with a subtropical climate band.
+
+Central Grand Northwind Reach is a continent with a polar climate band.
+
+Southern Highland Glen Basin is a continent with a subtropical climate band.
+
+Southern Quiet Juniper Uplands is a continent with a polar climate band.
+
+Western Ancient Arden Coast is a continent with a warm temperate climate band.
+
+Upper Grand Coral Uplands is a continent with a subtropical climate band.
+
+Lower Sunlit Briar Highlands is a continent with a polar climate band.
+
+Western Verdant Northwind Reach is a continent with a polar climate band.
+
+Upper White Maris Arc is a continent with a tropical climate band.
+
+Lower Royal Oak Arc is a continent with a warm temperate climate band.
+
+Central New Silver Coast is a continent with a tropical climate band.
+
+Eastern Verdant Redwood Arc is a continent with a cool temperate climate band.
+
+Upper Royal Alder Shores is a continent with a warm temperate climate band.
+
+Western Golden Northwind Highlands is a continent with a polar climate band.
+
+Central Bright Redwood Shores is a continent with a subtropical climate band.
+
+Western Lake Falcon Coast is a continent with a tropical climate band.
+
+Southern White Redwood Uplands is a continent with a tropical climate band.
+
+Southern Blue Coral Arc is a continent with a cool temperate climate band.
+
+Southern Windward Falcon Basin is a continent with a polar climate band.
+
+Northern White Juniper Uplands is a continent with a tropical climate band.
+
+Lower Emerald Maris Basin is a continent with a tropical climate band.
+
+Upper Verdant Falcon Coast is a continent with a polar climate band.
+
+Southern Golden Silver Uplands is a continent with a polar climate band.
+
+Eastern Windward Harbor Arc is a continent with a cool temperate climate band.
+
+Southern Highland Maris Basin is a continent with a cool temperate climate band.
+
+Northern Royal Linden Basin is a continent with a tropical climate band.
+
+Upper Verdant Briar Plateau is a continent with a polar climate band.
+
+Western Verdant Silver Isles is a continent with a tropical climate band.
+
+Northern Emerald Falcon Uplands is a continent with a polar climate band.
+
+Central Sapphire Alder Coast is a continent with a warm temperate climate band.
+
+Eastern Verdant Quartz Highlands is a continent with a warm temperate climate band.
+
+Eastern Lake Redwood Arc is a continent with a tropical climate band.
+
+Western White Alder Highlands is a continent with a cool temperate climate band.
+
+Lower White Redwood Uplands is a continent with a warm temperate climate band.
+
+Western New Glen Coast is a continent with a cool temperate climate band.
+
+Western Quiet Northwind Basin is a continent with a subtropical climate band.
+
+Central Royal Coral Plateau is a continent with a polar climate band.
+
+Lower Golden Dunmore Basin is a continent with a tropical climate band.
+
+Western Lake Linden Coast is a continent with a warm temperate climate band.
+
+Central Verdant Quartz Shores is a continent with a warm temperate climate band.
+
+Central Quiet Arden Plateau is a continent with a cool temperate climate band.
+
+Upper Blue Dunmore Uplands is a continent with a cool temperate climate band.
+
+Central Windward Cedar Shores is a continent with a cool temperate climate band.
+
+Southern Lake Alder Arc is a continent with a polar climate band.
+
+Upper White Willow Coast is a continent with a warm temperate climate band.
+
+Western Bright Falcon Reach is a continent with a subtropical climate band.
+
+Central Verdant Coral Uplands is a continent with a polar climate band.
+
+Lower Highland Arden Arc is a continent with a cool temperate climate band.
+
+Northern Grand Maris Arc is a continent with a subtropical climate band.
+
+Lower White Oak Plateau is a continent with a subtropical climate band.
+
+Upper Golden Harbor Arc is a continent with a subtropical climate band.
+
+Upper Royal Willow Plateau is a continent with a polar climate band.
+
+Central Quiet Linden Reach is a continent with a tropical climate band.
+
+Southern Blue Willow Reach is a continent with a warm temperate climate band.
+
+Lower Golden Glen Shores is a continent with a polar climate band.
+
+Lower New Maris Isles is a continent with a warm temperate climate band.
+
+Lower Grand Briar Basin is a continent with a polar climate band.
+
+Eastern Quiet Maris Basin is a continent with a polar climate band.
+
+Central Bright Dunmore Plateau is a continent with a cool temperate climate band.
+
+Eastern Sapphire Linden Highlands is a continent with a polar climate band.
+
+Western Bright Maris Reach is a continent with a subtropical climate band.
+
+Lower Windward Willow Shores is a continent with a cool temperate climate band.
+
+Northern Verdant Silver Reach is a continent with a warm temperate climate band.
+
+Northern Sapphire Falcon Basin is a continent with a subtropical climate band.
+
+Upper Ancient Falcon Highlands is a continent with a subtropical climate band.
+
+Central Ancient Alder Arc is a continent with a subtropical climate band.
+
+Eastern White Maris Uplands is a continent with a cool temperate climate band.
+
+Eastern Verdant Coral Basin is a continent with a polar climate band.
+
+Lower Grand Redwood Basin is a continent with a cool temperate climate band.
+
+Central Sunlit Falcon Coast is a continent with a warm temperate climate band.
+
+Lower Sapphire Briar Uplands is a continent with a warm temperate climate band.
+
+Eastern Blue Linden Isles is a continent with a polar climate band.
+
+Southern Grand Cedar Isles is a continent with a cool temperate climate band.
+
+Upper White Arden Uplands is a continent with a tropical climate band.
+
+Lower Lake Elm Uplands is a continent with a cool temperate climate band.
+
+Northern Verdant Oak Isles is a continent with a polar climate band.
+
+Central Quiet Elm Plateau is a continent with a subtropical climate band.
+
+Southern Emerald Dunmore Isles is a continent with a polar climate band.
+
+Western Verdant Oak Shores is a continent with a subtropical climate band.
+
+Upper Quiet Juniper Highlands is a continent with a cool temperate climate band.
+
+Northern Sunlit Briar Shores is a continent with a tropical climate band.
+
+Southern Blue Quartz Isles is a continent with a warm temperate climate band.
+
+Lower Emerald Coral Plateau is a continent with a warm temperate climate band.
+
+Eastern Royal Harbor Uplands is a continent with a polar climate band.
+
+Lower Emerald Glen Coast is a continent with a warm temperate climate band.
+
+Lower Golden Linden Isles is a continent with a subtropical climate band.
+
+Lower White Redwood Isles is a continent with a warm temperate climate band.
+
+Central Highland Juniper Plateau is a continent with a tropical climate band.
+
+Central Ancient Willow Rim is a continent with a warm temperate climate band.
+
+Upper Bright Falcon Basin is a continent with a subtropical climate band.
+
+Central New Juniper Uplands is a continent with a cool temperate climate band.
+
+Upper Lake Redwood Uplands is a continent with a cool temperate climate band.
+
+Western Blue Silver Plateau is a continent with a warm temperate climate band.
+
+Upper Quiet Redwood Reach is a continent with a subtropical climate band.
+
+Upper Windward Dunmore Reach is a continent with a warm temperate climate band.
+
+Northern Emerald Silver Arc is a continent with a polar climate band.
+
+Eastern Grand Quartz Arc is a continent with a polar climate band.
+
+Western Windward Harbor Arc is a continent with a cool temperate climate band.
+
+Western Golden Harbor Plateau is a continent with a polar climate band.
+
+Upper White Arden Basin is a continent with a warm temperate climate band.
+
+Western Sunlit Juniper Shores is a continent with a polar climate band.
+
+Upper Sunlit Dunmore Rim is a continent with a cool temperate climate band.
+
+Northern Bright Northwind Plateau is a continent with a subtropical climate band.
+
+Western Verdant Harbor Shores is a continent with a subtropical climate band.
+
+Lower Verdant Oak Highlands is a continent with a cool temperate climate band.
+
+Western Bright Pine Uplands is a continent with a subtropical climate band.
+
+Lower Quiet Harbor Uplands is a continent with a polar climate band.
+
+Central Bright Maris Plateau is a continent with a subtropical climate band.
+
+Upper Sunlit Briar Arc is a continent with a polar climate band.
+
+Eastern Ancient Redwood Coast is a continent with a tropical climate band.
+
+Western Quiet Alder Rim is a continent with a subtropical climate band.
+
+Western Highland Juniper Isles is a continent with a warm temperate climate band.
+
+Central Grand Redwood Rim is a continent with a polar climate band.
+
+Southern Grand Briar Uplands is a continent with a cool temperate climate band.
+
+Eastern White Cedar Rim is a continent with a warm temperate climate band.
+
+Upper Sunlit Juniper Reach is a continent with a polar climate band.
+
+Northern Emerald Briar Rim is a continent with a warm temperate climate band.
+
+Lower Verdant Coral Coast is a continent with a cool temperate climate band.
+
+Eastern Highland Glen Shores is a continent with a subtropical climate band.
+
+Eastern Royal Alder Arc is a continent with a warm temperate climate band.
+
+Southern White Elm Rim is a continent with a polar climate band.
+
+Lower Sunlit Quartz Reach is a continent with a tropical climate band.
+
+Western Windward Northwind Isles is a continent with a subtropical climate band.
+
+Eastern Lake Cedar Highlands is a continent with a subtropical climate band.
+
+Lower Windward Coral Highlands is a continent with a subtropical climate band.
+
+Western Quiet Alder Coast is a continent with a polar climate band.
+
+Northern Verdant Harbor Plateau is a continent with a subtropical climate band.
+
+Western Royal Cedar Rim is a continent with a warm temperate climate band.
+
+Central New Coral Rim is a continent with a subtropical climate band.
+
+Southern Golden Silver Reach is a continent with a polar climate band.
+
+Eastern Highland Arden Plateau is a continent with a polar climate band.
+
+Central Highland Falcon Reach is a continent with a tropical climate band.
+
+Northern Sapphire Elm Rim is a continent with a polar climate band.
+
+Western Emerald Willow Shores is a continent with a warm temperate climate band.
+
+Northern Emerald Redwood Isles is a continent with a tropical climate band.
+
+Lower Lake Alder Basin is a continent with a warm temperate climate band.
+
+Central Ancient Juniper Arc is a continent with a polar climate band.
+
+Southern Windward Northwind Basin is a continent with a cool temperate climate band.
+
+Northern Windward Glen Basin is a continent with a tropical climate band.
+
+Upper Royal Briar Uplands is a continent with a polar climate band.
+
+Southern Highland Falcon Reach is a continent with a warm temperate climate band.
+
+Northern New Briar Highlands is a continent with a warm temperate climate band.
+
+Western Bright Harbor Rim is a continent with a cool temperate climate band.
+
+Southern Ancient Glen Highlands is a continent with a subtropical climate band.
+
+Eastern Royal Redwood Plateau is a continent with a subtropical climate band.
+
+Western Grand Juniper Basin is a continent with a subtropical climate band.
+
+Western Emerald Redwood Rim is a continent with a polar climate band.
+
+Northern New Glen Rim is a continent with a polar climate band.
+
+Upper Ancient Dunmore Isles is a continent with a warm temperate climate band.
+
+Northern Highland Coral Isles is a continent with a polar climate band.
+
+Central Blue Arden Highlands is a continent with a subtropical climate band.
+
+Northern Verdant Silver Arc is a continent with a cool temperate climate band.
+
+Western Lake Linden Shores is a continent with a subtropical climate band.
+
+Northern Sapphire Redwood Reach is a continent with a cool temperate climate band.
+
+Western Sapphire Arden Isles is a continent with a tropical climate band.
+
+Lower Golden Coral Coast is a continent with a subtropical climate band.
+
+Central Ancient Glen Highlands is a continent with a tropical climate band.
+
+Northern Ancient Linden Reach is a continent with a cool temperate climate band.
+
+Southern Ancient Coral Coast is a continent with a subtropical climate band.
+
+Central Grand Quartz Highlands is a continent with a polar climate band.
+
+Upper Grand Cedar Uplands is a continent with a subtropical climate band.
+
+Lower Windward Willow Arc is a continent with a cool temperate climate band.
+
+Lower Verdant Maris Uplands is a continent with a cool temperate climate band.
+
+Southern Golden Oak Isles is a continent with a polar climate band.
+
+Central White Silver Highlands is a continent with a polar climate band.
+
+Southern Sunlit Glen Uplands is a continent with a warm temperate climate band.
+
+Northern Golden Redwood Reach is a continent with a tropical climate band.
+
+Central Ancient Elm Basin is a continent with a warm temperate climate band.
+
+Southern Highland Oak Basin is a continent with a polar climate band.
+
+Southern Blue Pine Plateau is a continent with a warm temperate climate band.
+
+Western Sunlit Maris Plateau is a continent with a cool temperate climate band.
+
+Upper Highland Maris Arc is a continent with a subtropical climate band.
+
+Upper Quiet Northwind Plateau is a continent with a polar climate band.
+
+Eastern Sunlit Juniper Plateau is a continent with a subtropical climate band.
+
+Eastern Bright Willow Highlands is a continent with a tropical climate band.
+
+Northern Quiet Linden Basin is a continent with a warm temperate climate band.
+
+Northern Highland Quartz Reach is a continent with a polar climate band.
+
+Southern Ancient Arden Plateau is a continent with a tropical climate band.
+
+Western Windward Cedar Plateau is a continent with a subtropical climate band.
+
+Lower Windward Northwind Plateau is a continent with a subtropical climate band.
+
+Lower Emerald Oak Arc is a continent with a polar climate band.
+
+Central Royal Harbor Basin is a continent with a warm temperate climate band.
+
+Eastern Ancient Dunmore Shores is a continent with a tropical climate band.
+
+Central Ancient Oak Highlands is a continent with a subtropical climate band.
+
+Central Blue Juniper Plateau is a continent with a cool temperate climate band.
+
+Central Sapphire Quartz Arc is a continent with a warm temperate climate band.
+
+Central Bright Dunmore Shores is a continent with a cool temperate climate band.
+
+Southern Quiet Alder Shores is a continent with a tropical climate band.
+
+Eastern Highland Oak Isles is a continent with a warm temperate climate band.
+
+Upper Bright Harbor Arc is a continent with a warm temperate climate band.
+
+Upper Sapphire Willow Plateau is a continent with a warm temperate climate band.
+
+Upper Golden Cedar Highlands is a continent with a cool temperate climate band.
+
+Central Sapphire Juniper Arc is a continent with a subtropical climate band.
+
+Central Emerald Juniper Highlands is a continent with a polar climate band.
+
+Central White Glen Coast is a continent with a cool temperate climate band.
+
+Western Verdant Redwood Rim is a continent with a warm temperate climate band.
+
+Upper Blue Harbor Coast is a continent with a warm temperate climate band.
+
+Western Sunlit Northwind Plateau is a continent with a cool temperate climate band.
+
+Northern Windward Maris Shores is a continent with a warm temperate climate band.
+
+Central Golden Juniper Highlands is a continent with a cool temperate climate band.
+
+Western Royal Falcon Rim is a continent with a cool temperate climate band.
+
+Northern Royal Arden Isles is a continent with a tropical climate band.
+
+Southern Royal Arden Uplands is a continent with a cool temperate climate band.
+
+Upper Lake Falcon Shores is a continent with a subtropical climate band.
+
+Lower Ancient Pine Coast is a continent with a warm temperate climate band.
+
+Upper Sunlit Quartz Shores is a continent with a tropical climate band.
+
+Lower White Oak Uplands is a continent with a tropical climate band.
+
+Upper Verdant Cedar Coast is a continent with a polar climate band.
+
+Upper Golden Glen Reach is a continent with a warm temperate climate band.
+
+Northern Blue Coral Basin is a continent with a tropical climate band.
+
+Western Verdant Silver Plateau is a continent with a polar climate band.
+
+Central Ancient Dunmore Isles is a continent with a cool temperate climate band.
+
+Upper New Coral Coast is a continent with a polar climate band.
+
+Northern Golden Alder Basin is a continent with a subtropical climate band.
+
+Eastern Sunlit Quartz Shores is a continent with a cool temperate climate band.
+
+Central White Harbor Coast is a continent with a subtropical climate band.
+
+Central Bright Juniper Uplands is a continent with a subtropical climate band.
+
+Lower Blue Coral Arc is a continent with a tropical climate band.
+
+Upper White Dunmore Highlands is a continent with a tropical climate band.
+
+Central Lake Northwind Isles is a continent with a warm temperate climate band.
+
+Southern Blue Redwood Coast is a continent with a tropical climate band.
+
+Upper White Cedar Basin is a continent with a warm temperate climate band.
+
+Northern Bright Juniper Highlands is a continent with a tropical climate band.
+
+Western Highland Northwind Arc is a continent with a subtropical climate band.
+
+Northern Lake Alder Uplands is a continent with a tropical climate band.
+
+Upper Quiet Dunmore Uplands is a continent with a polar climate band.
+
+Eastern Ancient Juniper Shores is a continent with a warm temperate climate band.
+
+Western Quiet Juniper Highlands is a continent with a tropical climate band.
+
+Central Quiet Juniper Arc is a continent with a cool temperate climate band.
+
+Northern Windward Cedar Plateau is a continent with a warm temperate climate band.
+
+Northern Ancient Quartz Isles is a continent with a subtropical climate band.
+
+Upper New Arden Isles is a continent with a cool temperate climate band.
+
+Central Emerald Alder Basin is a continent with a tropical climate band.
+
+Lower Golden Oak Coast is a continent with a tropical climate band.
+
+Eastern Windward Briar Arc is a continent with a polar climate band.
+
+Lower Verdant Northwind Shores is a continent with a cool temperate climate band.
+
+Southern Sapphire Juniper Reach is a continent with a subtropical climate band.
+
+Upper Blue Redwood Basin is a continent with a subtropical climate band.
+
+Western Highland Coral Isles is a continent with a subtropical climate band.
+
+Southern Blue Elm Plateau is a continent with a cool temperate climate band.
+
+Northern Quiet Briar Highlands is a continent with a polar climate band.
+
+Eastern Verdant Northwind Isles is a continent with a cool temperate climate band.
+
+Western Bright Falcon Rim is a continent with a tropical climate band.
+
+Eastern Lake Maris Uplands is a continent with a cool temperate climate band.
+
+Southern Sunlit Alder Rim is a continent with a cool temperate climate band.
+
+Central New Arden Isles is a continent with a subtropical climate band.
+
+Eastern Grand Northwind Coast is a continent with a cool temperate climate band.
+
+Lower New Silver Plateau is a continent with a tropical climate band.
+
+Southern Sapphire Silver Reach is a continent with a tropical climate band.
+
+Upper Highland Juniper Shores is a continent with a tropical climate band.
+
+Lower Blue Alder Coast is a continent with a cool temperate climate band.
+
+Northern Highland Falcon Basin is a continent with a tropical climate band.
+
+Southern Golden Cedar Highlands is a continent with a polar climate band.
+
+Upper Quiet Harbor Shores is a continent with a warm temperate climate band.
+
+Central Lake Elm Reach is a continent with a warm temperate climate band.
+
+Upper Royal Harbor Highlands is a continent with a warm temperate climate band.
+
+Lower Highland Coral Coast is a continent with a cool temperate climate band.
+
+Central Bright Silver Rim is a continent with a warm temperate climate band.
+
+Central White Pine Basin is a continent with a polar climate band.
+
+Western Grand Silver Shores is a continent with a polar climate band.
+
+Central Sapphire Linden Rim is a continent with a cool temperate climate band.
+
+Eastern Lake Glen Shores is a continent with a subtropical climate band.
+
+Upper Blue Pine Shores is a continent with a tropical climate band.
+
+Upper White Glen Plateau is a continent with a warm temperate climate band.
+
+Upper Grand Oak Uplands is a continent with a cool temperate climate band.
+
+Lower Sunlit Harbor Uplands is a continent with a polar climate band.
+
+Eastern Golden Quartz Rim is a continent with a subtropical climate band.
+
+Western White Cedar Basin is a continent with a warm temperate climate band.
+
+Central Highland Willow Plateau is a continent with a tropical climate band.
+
+Central Windward Coral Shores is a continent with a cool temperate climate band.
+
+Central Emerald Dunmore Uplands is a continent with a subtropical climate band.
+
+Upper Golden Northwind Reach is a continent with a warm temperate climate band.
+
+Eastern Highland Juniper Rim is a continent with a cool temperate climate band.
+
+Northern Emerald Elm Arc is a continent with a subtropical climate band.
+
+Central Lake Elm Coast is a continent with a warm temperate climate band.
+
+Upper Golden Falcon Uplands is a continent with a tropical climate band.
+
+Western Sunlit Coral Isles is a continent with a cool temperate climate band.
+
+Eastern Blue Northwind Isles is a continent with a tropical climate band.
+
+Southern Highland Cedar Rim is a continent with a polar climate band.
+
+Lower Lake Coral Isles is a continent with a subtropical climate band.
+
+Upper Ancient Alder Arc is a continent with a subtropical climate band.
+
+Upper Golden Falcon Shores is a continent with a subtropical climate band.
+
+Eastern Golden Juniper Reach is a continent with a warm temperate climate band.
+
+Upper Sunlit Elm Reach is a continent with a polar climate band.
+
+Western Highland Arden Shores is a continent with a subtropical climate band.
+
+Upper Highland Elm Plateau is a continent with a cool temperate climate band.
+
+Northern White Willow Uplands is a continent with a subtropical climate band.
+
+Central Blue Redwood Uplands is a continent with a warm temperate climate band.
+
+Central Lake Redwood Reach is a continent with a subtropical climate band.
+
+Central Grand Briar Reach is a continent with a subtropical climate band.
+
+Central Bright Cedar Rim is a continent with a cool temperate climate band.
+
+Eastern Windward Willow Plateau is a continent with a warm temperate climate band.
+
+Upper Ancient Silver Isles is a continent with a polar climate band.
+
+Lower Highland Coral Uplands is a continent with a warm temperate climate band.
+
+Southern White Silver Arc is a continent with a subtropical climate band.
+
+Central Emerald Pine Plateau is a continent with a tropical climate band.
+
+Northern Highland Alder Uplands is a continent with a subtropical climate band.
+
+Southern Blue Willow Isles is a continent with a tropical climate band.
+
+Eastern White Briar Highlands is a continent with a cool temperate climate band.
+
+Northern Lake Juniper Reach is a continent with a cool temperate climate band.
+
+Southern Quiet Cedar Shores is a continent with a subtropical climate band.
+
+Lower White Silver Arc is a continent with a subtropical climate band.
+
+Upper Windward Cedar Isles is a continent with a polar climate band.
+
+Northern New Harbor Reach is a continent with a subtropical climate band.
+
+Western Windward Willow Arc is a continent with a tropical climate band.
+
+Upper Windward Glen Basin is a continent with a polar climate band.
+
+Lower Grand Pine Coast is a continent with a cool temperate climate band.
+
+Lower Grand Dunmore Plateau is a continent with a polar climate band.
+
+Southern Verdant Harbor Basin is a continent with a polar climate band.
+
+Southern Windward Cedar Isles is a continent with a cool temperate climate band.
+
+Eastern Windward Juniper Basin is a continent with a warm temperate climate band.
+
+Southern Quiet Glen Coast is a continent with a tropical climate band.
+
+Upper Sapphire Willow Shores is a continent with a tropical climate band.
+
+Western Sapphire Quartz Plateau is a continent with a polar climate band.
+
+Upper Highland Arden Rim is a continent with a warm temperate climate band.
+
+Eastern Blue Willow Arc is a continent with a subtropical climate band.
+
+Lower Royal Falcon Plateau is a continent with a warm temperate climate band.
+
+Lower Golden Alder Rim is a continent with a warm temperate climate band.
+
+Lower Lake Arden Arc is a continent with a subtropical climate band.
+
+Upper Highland Oak Uplands is a continent with a warm temperate climate band.
+
+Central Blue Northwind Plateau is a continent with a polar climate band.
+
+Lower Highland Alder Isles is a continent with a polar climate band.
+
+Western Verdant Coral Rim is a continent with a warm temperate climate band.
+
+Central Emerald Redwood Coast is a continent with a tropical climate band.
+
+Lower White Linden Reach is a continent with a cool temperate climate band.
+
+Central Bright Elm Rim is a continent with a subtropical climate band.
+
+Eastern Sapphire Linden Basin is a continent with a warm temperate climate band.
+
+Upper White Dunmore Rim is a continent with a tropical climate band.
+
+Lower Bright Harbor Plateau is a continent with a subtropical climate band.
+
+Western Emerald Elm Shores is a continent with a subtropical climate band.
+
+Upper Blue Coral Highlands is a continent with a subtropical climate band.
+
+Eastern Golden Redwood Reach is a continent with a warm temperate climate band.
+
+Northern Blue Redwood Uplands is a continent with a cool temperate climate band.
+
+Lower Ancient Elm Plateau is a continent with a tropical climate band.
+
+Southern White Falcon Plateau is a continent with a polar climate band.
+
+Eastern Emerald Northwind Coast is a continent with a warm temperate climate band.
+
+Central Quiet Northwind Shores is a continent with a tropical climate band.
+
+Upper New Elm Rim is a continent with a polar climate band.
+
+Eastern Sunlit Silver Plateau is a continent with a cool temperate climate band.
+
+Western Blue Coral Reach is a continent with a cool temperate climate band.
+
+Northern Bright Northwind Coast is a continent with a warm temperate climate band.
+
+Central Royal Willow Arc is a continent with a warm temperate climate band.
+
+Central Blue Briar Isles is a continent with a subtropical climate band.
+
+Southern Sunlit Alder Reach is a continent with a polar climate band.
+
+Western Golden Alder Arc is a continent with a warm temperate climate band.
+
+Western Sapphire Northwind Basin is a continent with a cool temperate climate band.
+
+Eastern Lake Linden Uplands is a continent with a polar climate band.
+
+Central White Maris Coast is a continent with a polar climate band.
+
+Upper Sunlit Briar Coast is a continent with a subtropical climate band.
+
+Central White Alder Plateau is a continent with a warm temperate climate band.
+
+Lower Royal Glen Plateau is a continent with a tropical climate band.
+
+Upper Emerald Dunmore Basin is a continent with a tropical climate band.
+
+Upper Golden Northwind Rim is a continent with a tropical climate band.
+
+Southern Royal Juniper Arc is a continent with a cool temperate climate band.
+
+Lower Windward Falcon Uplands is a continent with a warm temperate climate band.
+
+Northern Ancient Cedar Isles is a continent with a subtropical climate band.
+
+Central Lake Coral Shores is a continent with a subtropical climate band.
+
+Central Lake Quartz Shores is a continent with a polar climate band.
+
+Northern Golden Quartz Arc is a continent with a tropical climate band.
+
+Eastern Emerald Arden Arc is a continent with a tropical climate band.
+
+Eastern Windward Northwind Isles is a continent with a cool temperate climate band.
+
+Southern Bright Linden Coast is a continent with a tropical climate band.
+
+Eastern Verdant Juniper Highlands is a continent with a cool temperate climate band.
+
+Northern New Cedar Shores is a continent with a warm temperate climate band.
+
+Eastern Blue Glen Reach is a continent with a polar climate band.
+
+Upper Ancient Briar Basin is a continent with a polar climate band.
+
+Upper Quiet Elm Shores is a continent with a tropical climate band.
+
+Northern New Pine Uplands is a continent with a warm temperate climate band.
+
+Southern Emerald Juniper Plateau is a continent with a polar climate band.
+
+Lower Royal Cedar Basin is a continent with a subtropical climate band.
+
+Central Quiet Dunmore Plateau is a continent with a tropical climate band.
+
+Lower Quiet Harbor Highlands is a continent with a warm temperate climate band.
+
+Upper Golden Elm Plateau is a continent with a polar climate band.
+
+Central Royal Linden Isles is a continent with a tropical climate band.
+
+Upper New Pine Coast is a continent with a tropical climate band.
+
+Western Emerald Cedar Uplands is a continent with a polar climate band.
+
+Western Grand Briar Reach is a continent with a subtropical climate band.
+
+Western Grand Silver Basin is a continent with a cool temperate climate band.
+
+Central Verdant Northwind Basin is a continent with a cool temperate climate band.
+
+Western Ancient Silver Highlands is a continent with a warm temperate climate band.
+
+Eastern New Redwood Reach is a continent with a cool temperate climate band.
+
+Southern Royal Dunmore Highlands is a continent with a polar climate band.
+
+Central Quiet Elm Rim is a continent with a tropical climate band.
+
+Eastern Highland Elm Uplands is a continent with a cool temperate climate band.
+
+Central Emerald Oak Reach is a continent with a polar climate band.
+
+Northern Sapphire Coral Shores is a continent with a cool temperate climate band.
+
+Lower Grand Falcon Plateau is a continent with a subtropical climate band.
+
+Northern Lake Willow Arc is a continent with a warm temperate climate band.
+
+Central Sunlit Alder Highlands is a continent with a tropical climate band.
+
+Central Sapphire Dunmore Uplands is a continent with a tropical climate band.
+
+Lower Lake Cedar Isles is a continent with a warm temperate climate band.
+
+Central Lake Coral Coast is a continent with a cool temperate climate band.
+
+Western Bright Elm Plateau is a continent with a subtropical climate band.
+
+Lower Blue Harbor Reach is a continent with a polar climate band.
+
+Southern New Glen Basin is a continent with a tropical climate band.
+
+Central Lake Silver Isles is a continent with a subtropical climate band.
+
+Northern Royal Linden Rim is a continent with a cool temperate climate band.
+
+Eastern New Silver Isles is a continent with a tropical climate band.
+
+Southern Verdant Willow Reach is a continent with a cool temperate climate band.
+
+Western Sapphire Harbor Coast is a continent with a tropical climate band.
+
+Western Sunlit Falcon Rim is a continent with a subtropical climate band.
+
+Upper Highland Willow Rim is a continent with a cool temperate climate band.
+
+Southern Grand Northwind Shores is a continent with a subtropical climate band.
+
+Northern Ancient Falcon Reach is a continent with a cool temperate climate band.
+
+Eastern Blue Cedar Isles is a continent with a warm temperate climate band.
+
+Lower New Cedar Basin is a continent with a warm temperate climate band.
+
+Lower New Maris Coast is a continent with a subtropical climate band.
+
+Upper Quiet Harbor Uplands is a continent with a subtropical climate band.
+
+Upper Sapphire Maris Basin is a continent with a subtropical climate band.
+
+Western Sunlit Harbor Rim is a continent with a cool temperate climate band.
+
+Southern Windward Silver Uplands is a continent with a warm temperate climate band.
+
+Upper Emerald Quartz Shores is a continent with a cool temperate climate band.
+
+Southern Lake Oak Coast is a continent with a tropical climate band.
+
+Northern Blue Alder Reach is a continent with a tropical climate band.
+
+Lower White Alder Basin is a continent with a warm temperate climate band.
+
+Central Windward Harbor Coast is a continent with a polar climate band.
+
+Eastern Golden Pine Reach is a continent with a subtropical climate band.
+
+Northern Bright Briar Isles is a continent with a polar climate band.
+
+Upper Lake Linden Rim is a continent with a subtropical climate band.
+
+Central Royal Elm Arc is a continent with a tropical climate band.
+
+Central Highland Briar Basin is a continent with a polar climate band.
+
+Northern Quiet Northwind Uplands is a continent with a subtropical climate band.
+
+Northern Emerald Arden Highlands is a continent with a subtropical climate band.
+
+Northern Blue Glen Arc is a continent with a subtropical climate band.
+
+Central Highland Silver Shores is a continent with a warm temperate climate band.
+
+Upper Sapphire Linden Coast is a continent with a polar climate band.
+
+Western Ancient Elm Plateau is a continent with a warm temperate climate band.
+
+Central Golden Willow Highlands is a continent with a polar climate band.
+
+Eastern Sunlit Quartz Arc is a continent with a cool temperate climate band.
+
+Lower Emerald Maris Reach is a continent with a polar climate band.
+
+Upper Golden Arden Basin is a continent with a tropical climate band.
+
+Eastern White Falcon Plateau is a continent with a polar climate band.
+
+Upper Ancient Falcon Shores is a continent with a tropical climate band.
+
+Upper Verdant Juniper Basin is a continent with a subtropical climate band.
+
+Upper New Harbor Coast is a continent with a polar climate band.
+
+Northern Windward Glen Isles is a continent with a cool temperate climate band.
+
+Upper New Falcon Basin is a continent with a subtropical climate band.
+
+Western Ancient Harbor Coast is a continent with a subtropical climate band.
+
+Southern Sapphire Elm Uplands is a continent with a polar climate band.
+
+Upper Sapphire Dunmore Basin is a continent with a subtropical climate band.
+
+Central Lake Quartz Reach is a continent with a cool temperate climate band.
+
+Southern Ancient Falcon Rim is a continent with a cool temperate climate band.
+
+Lower Royal Falcon Arc is a continent with a tropical climate band.

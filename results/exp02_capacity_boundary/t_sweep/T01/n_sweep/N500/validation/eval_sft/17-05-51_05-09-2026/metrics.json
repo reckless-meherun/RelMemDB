@@ -1,0 +1,106 @@
+{
+  "by_hop": {
+    "H0": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.16,
+      "normalized_exact_match_correct": 8,
+      "strict_exact_match_accuracy": 0.16,
+      "strict_exact_match_correct": 8
+    },
+    "H1": {
+      "count": 0,
+      "normalized_exact_match_accuracy": null,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": null,
+      "strict_exact_match_correct": 0
+    },
+    "H2": {
+      "count": 0,
+      "normalized_exact_match_accuracy": null,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": null,
+      "strict_exact_match_correct": 0
+    },
+    "H3": {
+      "count": 0,
+      "normalized_exact_match_accuracy": null,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": null,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "by_target_field": {
+    "climate_band": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.16,
+      "normalized_exact_match_correct": 8,
+      "strict_exact_match_accuracy": 0.16,
+      "strict_exact_match_correct": 8
+    }
+  },
+  "conditional_relational_accuracy": {
+    "H1": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": null,
+      "total_count": 0
+    },
+    "H2": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": null,
+      "total_count": 0
+    },
+    "H3": {
+      "conditional_accuracy": null,
+      "conditional_correct_count": 0,
+      "eligible_count": 0,
+      "support_correct_count": 0,
+      "support_recall_rate": null,
+      "total_count": 0
+    }
+  },
+  "h0_by_fact_type": {
+    "attribute": {
+      "count": 50,
+      "normalized_exact_match_accuracy": 0.16,
+      "normalized_exact_match_correct": 8,
+      "strict_exact_match_accuracy": 0.16,
+      "strict_exact_match_correct": 8
+    },
+    "relation": {
+      "count": 0,
+      "normalized_exact_match_accuracy": null,
+      "normalized_exact_match_correct": 0,
+      "strict_exact_match_accuracy": null,
+      "strict_exact_match_correct": 0
+    }
+  },
+  "majority_gold_answer_baseline": {
+    "by_target_field": {
+      "climate_band": {
+        "accuracy": 0.32,
+        "correct_count": 16,
+        "count": 50,
+        "majority_gold_answer": "polar"
+      }
+    },
+    "macro_accuracy": 0.32
+  },
+  "overall": {
+    "count": 50,
+    "normalized_exact_match_accuracy": 0.16,
+    "normalized_exact_match_correct": 8,
+    "strict_exact_match_accuracy": 0.16,
+    "strict_exact_match_correct": 8
+  },
+  "primary_metric": "normalized_exact_match",
+  "target_field_macro_average": {
+    "normalized_exact_match_accuracy": 0.16,
+    "strict_exact_match_accuracy": 0.16
+  }
+}

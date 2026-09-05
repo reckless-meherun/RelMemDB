@@ -1,0 +1,122 @@
+{
+  "N": 500,
+  "T": 1,
+  "candidate_counts": {
+    "H0": 15,
+    "H1": 0,
+    "H2": 0,
+    "H3": 0
+  },
+  "candidate_total": 15,
+  "chain_count": 15,
+  "chain_indices": [
+    15,
+    31,
+    47,
+    65,
+    81,
+    97,
+    115,
+    131,
+    147,
+    165,
+    181,
+    197,
+    215,
+    231,
+    247
+  ],
+  "chain_indices_sha256": "c9c1351fd997bcbb122d4b2f2adb34736481cbb4a9d0faaada609e1854c5a182",
+  "counts": {
+    "H0": {
+      "candidate_count": 15,
+      "final_retained_count": 15,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 15,
+      "support_closure_filtered_count": 0
+    },
+    "H1": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    },
+    "H2": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    },
+    "H3": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    }
+  },
+  "counts_by_source_entity_type": {
+    "continent": 15
+  },
+  "counts_by_target_field": {
+    "climate_band": 15
+  },
+  "excluded_item_audit": {
+    "counts_by_reason": {},
+    "total_excluded": 0
+  },
+  "excluded_items": [],
+  "experiment_name": "exp02_capacity_boundary",
+  "final_retained_total": 15,
+  "format_version": 2,
+  "generation_timestamp": "20260905_170539_044259",
+  "h0_attribute_count": 15,
+  "h0_fact_type_counts": {
+    "attribute": 15,
+    "relation": 0
+  },
+  "h0_relation_count": 0,
+  "leakage_filtered_counts": {
+    "H0": 0,
+    "H1": 0,
+    "H2": 0,
+    "H3": 0
+  },
+  "output_file_hashes": {
+    "H0.jsonl": "7db06dc03e568243f5bb126ab82c411ea8c97e1556cace308fa49e407f9460dd",
+    "H1.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H2.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H3.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "question_template_version": "semantic_academic_closed_book_v1",
+  "requested_N": 500,
+  "retained_counts": {
+    "H0": 15,
+    "H1": 0,
+    "H2": 0,
+    "H3": 0
+  },
+  "selected_positions": [
+    0
+  ],
+  "selected_tables": [
+    "continent"
+  ],
+  "sft_split_method": "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev within each consecutive block of 10",
+  "sft_split_method_version": "reserved_order_9_train_1_dev_v1",
+  "source_database_manifest_sha256": "f751e8947361d9ab2b2f5f0bcf12bf512d5d5ad448a60fd41393f83887e23818",
+  "source_database_sha256": "e266a76206d4fcfafa22055d41fcc179fdc0bf876c8e66cae18168dc8901df74",
+  "source_dataset_manifest_sha256": "f751e8947361d9ab2b2f5f0bcf12bf512d5d5ad448a60fd41393f83887e23818",
+  "source_evaluation_split_manifest_sha256": "192841b708763180f8769c7d1c9027c45e12929c2064c7a3146a53d347e03b2f",
+  "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp02_capacity_boundary/T01_N500_continent_20260905_170206_800345",
+  "split": "dev",
+  "support_closure_filtered_counts": {
+    "H0": 0,
+    "H1": 0,
+    "H2": 0,
+    "H3": 0
+  },
+  "zero_context": true
+}
