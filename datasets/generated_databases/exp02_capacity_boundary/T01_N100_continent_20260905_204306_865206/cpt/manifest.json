@@ -1,0 +1,67 @@
+{
+  "T": 1,
+  "attribute_facts_per_exposure": 100,
+  "byte_count": 3949,
+  "character_count": 3949,
+  "experiment_name": "exp02_capacity_boundary",
+  "experimental_schema_column_count": 2,
+  "fact_exposure": 4,
+  "facts_per_selected_chain": 2,
+  "format_version": 3,
+  "identifier_schema_column_count": 1,
+  "identifiers_in_readable_book": 0,
+  "instance_sentence_count_per_exposure": 50,
+  "logical_content_sha256": "c093e7f8809352b425af1f458a5b60755250e2fd52145ef5c69a4379c5774b22",
+  "logical_entities_per_exposure": 50,
+  "logical_fact_coverage_sha256": "fccef681688b3bf6e1f6a0fc1c38bacc976f0ebe6a3c79987e71409ed5b281af",
+  "logical_facts_per_exposure": 100,
+  "physical_record_group_count": 1,
+  "physical_record_groups": [
+    {
+      "entity_types": [
+        "continent"
+      ],
+      "group_index": 1,
+      "physical_table": "continent",
+      "row_count": 50,
+      "semantic_positions": [
+        0
+      ]
+    }
+  ],
+  "physical_rows_per_exposure": 50,
+  "readable_book_byte_count": 3949,
+  "readable_book_character_count": 3949,
+  "readable_book_copy_count_in_train_text": 4,
+  "readable_book_line_count": 105,
+  "readable_book_sha256": "af201c4b9295763fea7af1259f1a23d1cfd5c2cae6ab5c20db0268b0721880eb",
+  "record_organization_sentence_count_per_exposure": 0,
+  "relation_facts_per_exposure": 0,
+  "requested_N": 100,
+  "schema_description_sentence_count_per_exposure": 1,
+  "schema_foreign_key_count_per_exposure": 0,
+  "schema_intra_table_relation_count_per_exposure": 0,
+  "schema_relationship_count_per_exposure": 0,
+  "selected_chain_count": 50,
+  "selected_tables": [
+    "continent"
+  ],
+  "sentence_count": 51,
+  "serialization_order": {
+    "entities": "ascending semantic position within each physical row",
+    "exposures": "identical copies of book_readable.txt",
+    "record_groups": "database-manifest position_partition order",
+    "rows": "ascending SQLite rowid within each physical record group"
+  },
+  "serialization_style": "natural_language_db_book_v1",
+  "serialized_logical_fact_occurrences": 400,
+  "source_database_manifest_sha256": "e9fab88b6b21b0364d9c5e9ab100240fad558449bd4c2d00626d4a0954f76c54",
+  "source_database_sha256": "ce73b995be0b4c22da55ce1daac7b816bb67c76d84657c9bd285e76cd09db5b3",
+  "source_identifier_count": 50,
+  "table_count": 1,
+  "total_schema_column_count": 3,
+  "train_text_byte_count": 15796,
+  "train_text_character_count": 15796,
+  "train_text_line_count": 420,
+  "train_text_sha256": "39b7a8b8f5e2f9aa0b4af69c2a916a5511d3540d6143e2ed19fabab832c77e9e"
+}
