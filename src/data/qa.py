@@ -206,6 +206,17 @@ def assign_chain_splits(chain_count: int) -> dict[str, list[int]]:
     return assignments
 
 
+def assign_exp2_chain_splits(chain_count: int) -> dict[str, list[int]]:
+    """Deterministic 3:1:1 split without Exp1's divisibility restriction."""
+    if isinstance(chain_count, bool) or not isinstance(chain_count, int) or chain_count <= 0:
+        raise ValueError("chain_count must be a positive integer")
+    assignments = {"reserved": [], "validation": [], "test": []}
+    for chain_index in range(chain_count):
+        offset = chain_index % 5
+        assignments["reserved" if offset < 3 else "validation" if offset == 3 else "test"].append(chain_index)
+    return assignments
+
+
 def assign_reserved_target_sft_splits(
     reserved_chain_indices: list[int],
 ) -> dict[str, list[int]]:
@@ -225,6 +236,22 @@ def assign_reserved_target_sft_splits(
         assignments[split].append(chain_index)
     if len(assignments["train"]) != 135 or len(assignments["dev"]) != 15:
         raise RuntimeError("target-SFT 9:1 chain assignment produced invalid counts")
+    return assignments
+
+
+def assign_exp2_target_sft_splits(
+    reserved_chain_indices: list[int],
+) -> dict[str, list[int]]:
+    if not reserved_chain_indices:
+        raise ValueError("Experiment-2 target SFT requires at least one reserved chain")
+    if len(set(reserved_chain_indices)) != len(reserved_chain_indices):
+        raise ValueError("reserved_chain_indices must be unique")
+    assignments = {"train": [], "dev": []}
+    for ordinal, chain_index in enumerate(reserved_chain_indices):
+        assignments["dev" if ordinal % 10 == 9 else "train"].append(chain_index)
+    # Tiny smoke datasets still need a distinct dev example when possible.
+    if not assignments["dev"] and len(assignments["train"]) > 1:
+        assignments["dev"].append(assignments["train"].pop())
     return assignments
 
 
@@ -255,12 +282,23 @@ def _verify_database_manifest(
         raise ValueError("database manifest logical fact counts are inconsistent")
     if manifest.get("latent_positions") != len(SEMANTIC_ENTITY_SPECS):
         raise ValueError("database manifest does not describe the academic chain")
-    if manifest.get("attribute_facts_per_chain") != 29:
-        raise ValueError("database manifest must contain 29 attributes per chain")
-    if manifest.get("relation_facts_per_chain") != 11:
-        raise ValueError("database manifest must contain 11 relations per chain")
-    if manifest.get("experimental_facts_per_chain") != 40:
-        raise ValueError("database manifest must contain 40 logical facts per chain")
+    is_exp2 = manifest.get("experiment_mode") == "selected_canonical_tables"
+    if is_exp2:
+        selected = manifest.get("selected_tables")
+        positions = manifest.get("selected_positions")
+        if not isinstance(selected, list) or not selected or not isinstance(positions, list):
+            raise ValueError("Experiment-2 selected-table metadata is missing")
+        if len(selected) != expected_table_count or len(positions) != expected_table_count:
+            raise ValueError("Experiment-2 selected-table metadata does not match T")
+        if manifest.get("physical_table_count") != len(SEMANTIC_ENTITY_SPECS):
+            raise ValueError("Experiment-2 support database must preserve all canonical tables")
+    else:
+        if manifest.get("attribute_facts_per_chain") != 29:
+            raise ValueError("database manifest must contain 29 attributes per chain")
+        if manifest.get("relation_facts_per_chain") != 11:
+            raise ValueError("database manifest must contain 11 relations per chain")
+        if manifest.get("experimental_facts_per_chain") != 40:
+            raise ValueError("database manifest must contain 40 logical facts per chain")
     connection = sqlite3.connect(database_path)
     try:
         if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
@@ -309,7 +347,8 @@ def load_verified_semantic_chains(
         chains.append({"chain_index": chain_index, "entities": entities})
     if metadata["source_identifier_count"] != chain_count * len(SEMANTIC_ENTITY_SPECS):
         raise ValueError("database identifier count does not match complete chains")
-    if chain_count * 40 != manifest["requested_N"]:
+    facts_per_chain = manifest.get("facts_per_selected_chain", 40)
+    if chain_count * facts_per_chain != manifest["requested_N"]:
         raise ValueError("chain count does not match requested logical facts")
     return chains, manifest
 
@@ -364,6 +403,8 @@ def generate_qa_candidates(
     chains: list[dict[str, Any]],
     chain_indices: list[int],
     split: str,
+    *,
+    exposed_positions: set[int] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if split not in QA_RECORD_SPLITS:
         raise ValueError("split must be train, dev, validation, or test")
@@ -389,6 +430,8 @@ def generate_qa_candidates(
         attribute_support_ids: dict[tuple[str, str], str] = {}
         relation_support_ids: dict[str, str] = {}
         for entity in entities:
+            if exposed_positions is not None and entity["position"] not in exposed_positions:
+                continue
             entity_type = entity["entity_type"]
             for field in H0_ATTRIBUTE_FIELDS[entity_type]:
                 semantic_key = ("h0", "attribute", entity["entity_id"], field)
@@ -409,6 +452,8 @@ def generate_qa_candidates(
                     },
                 )
         for source_position in H0_RELATION_SOURCE_POSITIONS:
+            if exposed_positions is not None and source_position not in exposed_positions:
+                continue
             source = entities[source_position]
             target = entities[source_position - 1]
             semantic_key = ("h0", "relation", source["entity_id"])
@@ -440,6 +485,11 @@ def generate_qa_candidates(
                     if source_position == 11
                     else list(range(source_position, target_position - 1, -1))
                 )
+                if exposed_positions is not None and (
+                    target_position not in exposed_positions
+                    or any(position not in exposed_positions for position in path_positions[:-1])
+                ):
+                    continue
                 path_entities = [entities[position] for position in path_positions]
                 question = _relational_question(hop, source)
                 _assert_relational_depth_is_not_shortened(question, path_entities)
@@ -577,6 +627,8 @@ def _split_manifest(
     database_manifest_path: Path,
     database_manifest: dict[str, Any],
     assignments: dict[str, list[int]],
+    source_training_data_dir: str | None = None,
+    generation_timestamp: str | None = None,
 ) -> dict[str, Any]:
     return {
         "format_version": QA_FORMAT_VERSION,
@@ -585,6 +637,7 @@ def _split_manifest(
         "requested_N": database_manifest["requested_N"],
         "source_database_sha256": hash_file(database_path),
         "source_database_manifest_sha256": hash_file(database_manifest_path),
+        "source_dataset_manifest_sha256": hash_file(database_manifest_path),
         "split_method": "repeating chain-order blocks: reserved, reserved, reserved, validation, test",
         "split_method_version": SPLIT_METHOD_VERSION,
         "question_template_version": QUESTION_TEMPLATE_VERSION,
@@ -598,6 +651,10 @@ def _split_manifest(
         "chain_assignments_sha256": hash_json_object(assignments),
         "target_qa_training_generated": False,
         "zero_context": True,
+        "selected_tables": database_manifest.get("selected_tables"),
+        "selected_positions": database_manifest.get("selected_positions"),
+        "source_training_data_dir": source_training_data_dir or database_manifest.get("artifact_path"),
+        "generation_timestamp": generation_timestamp,
     }
 
 
@@ -629,10 +686,18 @@ def _write_split(
         "source_database_manifest_sha256": base_manifest[
             "source_database_manifest_sha256"
         ],
+        "source_dataset_manifest_sha256": base_manifest.get(
+            "source_dataset_manifest_sha256",
+            base_manifest["source_database_manifest_sha256"],
+        ),
         "split_method": base_manifest["split_method"],
         "split_method_version": SPLIT_METHOD_VERSION,
         "question_template_version": QUESTION_TEMPLATE_VERSION,
         "zero_context": True,
+        "selected_tables": base_manifest.get("selected_tables"),
+        "selected_positions": base_manifest.get("selected_positions"),
+        "source_training_data_dir": base_manifest.get("source_training_data_dir"),
+        "generation_timestamp": base_manifest.get("generation_timestamp"),
         "counts": audit["counts"],
         "candidate_total": sum(
             counts["candidate_count"] for counts in audit["counts"].values()
@@ -655,6 +720,8 @@ def generate_condition_qa(
     *,
     expected_table_count: int,
     expected_logical_fact_count: int | None = None,
+    source_training_data_dir: str | Path | None = None,
+    generation_timestamp: str | None = None,
 ) -> dict[str, Any]:
     database_path = Path(database_path)
     database_manifest_path = Path(database_manifest_path)
@@ -665,18 +732,28 @@ def generate_condition_qa(
         expected_table_count=expected_table_count,
         expected_logical_fact_count=expected_logical_fact_count,
     )
-    assignments = assign_chain_splits(len(chains))
+    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    assignments = (
+        assign_exp2_chain_splits(len(chains))
+        if is_exp2 else assign_chain_splits(len(chains))
+    )
+    exposed_positions = set(database_manifest.get("selected_positions", [])) if is_exp2 else None
     base_manifest = _split_manifest(
         config=config,
         database_path=database_path,
         database_manifest_path=database_manifest_path,
         database_manifest=database_manifest,
         assignments=assignments,
+        source_training_data_dir=(
+            str(Path(source_training_data_dir).resolve())
+            if source_training_data_dir is not None else None
+        ),
+        generation_timestamp=generation_timestamp,
     )
     split_manifests: dict[str, dict[str, Any]] = {}
     for split in ("validation", "test"):
         candidates = generate_qa_candidates(
-            chains, assignments[split], split
+            chains, assignments[split], split, exposed_positions=exposed_positions
         )
         records, audit = filter_qa_candidates(candidates)
         split_manifests[split] = _write_split(
@@ -702,8 +779,10 @@ def generate_condition_qa(
     }
 
 
-def _require_nonempty_artifact(path: Path, label: str) -> Path:
-    if not path.is_file() or path.stat().st_size == 0:
+def _require_nonempty_artifact(
+    path: Path, label: str, *, allow_empty: bool = False
+) -> Path:
+    if not path.is_file() or (path.stat().st_size == 0 and not allow_empty):
         raise FileNotFoundError(f"{label} is missing or empty: {path}")
     return path
 
@@ -719,9 +798,15 @@ def _immutable_evaluation_artifact_paths(
     return paths
 
 
-def _hash_artifacts(paths: dict[str, Path]) -> dict[str, str]:
+def _hash_artifacts(
+    paths: dict[str, Path], *, allow_empty_jsonl: bool = False
+) -> dict[str, str]:
     return {
-        name: hash_file(_require_nonempty_artifact(path, name))
+        name: hash_file(
+            _require_nonempty_artifact(
+                path, name, allow_empty=allow_empty_jsonl and path.suffix == ".jsonl"
+            )
+        )
         for name, path in paths.items()
     }
 
@@ -794,6 +879,9 @@ def _load_existing_evaluation_split(
         ],
         "question_template_version": QUESTION_TEMPLATE_VERSION,
         "zero_context": True,
+        "selected_tables": root_manifest.get("selected_tables"),
+        "selected_positions": root_manifest.get("selected_positions"),
+        "source_training_data_dir": root_manifest.get("source_training_data_dir"),
     }
     for key, expected in expected_metadata.items():
         if manifest.get(key) != expected:
@@ -805,7 +893,12 @@ def _load_existing_evaluation_split(
     records: dict[str, list[dict[str, Any]]] = {}
     for hop_name in HOP_NAMES:
         path = _require_nonempty_artifact(
-            split_dir / f"{hop_name}.jsonl", f"{split} {hop_name}"
+            split_dir / f"{hop_name}.jsonl",
+            f"{split} {hop_name}",
+            allow_empty=(
+                root_manifest.get("experiment_name") == "exp02_capacity_boundary"
+                and manifest.get("counts", {}).get(hop_name, {}).get("final_retained_count") == 0
+            ),
         )
         if hash_file(path) != manifest["output_file_hashes"].get(path.name):
             raise ValueError(f"{split} {hop_name} hash does not match its manifest")
@@ -834,15 +927,19 @@ def _validate_evaluation_split_manifest(
     database_manifest: dict[str, Any],
     chain_count: int,
 ) -> None:
+    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    assignments = (
+        assign_exp2_chain_splits(chain_count) if is_exp2 else assign_chain_splits(chain_count)
+    )
     expected = {
         "format_version": QA_FORMAT_VERSION,
         "experiment_name": database_manifest["experiment_name"],
         "T": database_manifest["T"],
         "requested_N": database_manifest["requested_N"],
         "total_chain_count": chain_count,
-        "reserved_chain_count": 150,
-        "validation_chain_count": 50,
-        "test_chain_count": 50,
+        "reserved_chain_count": len(assignments["reserved"]),
+        "validation_chain_count": len(assignments["validation"]),
+        "test_chain_count": len(assignments["test"]),
         "source_database_sha256": hash_file(database_path),
         "source_database_manifest_sha256": hash_file(database_manifest_path),
         "split_method_version": SPLIT_METHOD_VERSION,
@@ -859,7 +956,9 @@ def _validate_evaluation_split_manifest(
         name: root_manifest.get(f"{name}_chain_indices")
         for name in ("reserved", "validation", "test")
     }
-    if assignments != assign_chain_splits(chain_count):
+    if assignments != (
+        assign_exp2_chain_splits(chain_count) if is_exp2 else assign_chain_splits(chain_count)
+    ):
         raise ValueError("source evaluation chain assignments are invalid")
     if root_manifest.get("chain_assignments_sha256") != hash_json_object(assignments):
         raise ValueError("source evaluation chain assignment hash is invalid")
@@ -980,6 +1079,10 @@ def _target_split_manifest(
         "source_database_manifest_sha256": base_manifest[
             "source_database_manifest_sha256"
         ],
+        "source_dataset_manifest_sha256": base_manifest.get(
+            "source_dataset_manifest_sha256",
+            base_manifest["source_database_manifest_sha256"],
+        ),
         "source_evaluation_split_manifest_sha256": base_manifest[
             "source_evaluation_split_manifest_sha256"
         ],
@@ -987,6 +1090,10 @@ def _target_split_manifest(
         "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
         "question_template_version": QUESTION_TEMPLATE_VERSION,
         "zero_context": True,
+        "selected_tables": base_manifest.get("selected_tables"),
+        "selected_positions": base_manifest.get("selected_positions"),
+        "source_training_data_dir": base_manifest.get("source_training_data_dir"),
+        "generation_timestamp": base_manifest.get("generation_timestamp"),
         "candidate_counts": candidate_counts,
         "leakage_filtered_counts": leakage_counts,
         "support_closure_filtered_counts": closure_counts,
@@ -1046,6 +1153,8 @@ def generate_target_sft_qa(
     *,
     expected_table_count: int,
     expected_logical_fact_count: int | None = None,
+    source_training_data_dir: str | Path | None = None,
+    generation_timestamp: str | None = None,
 ) -> dict[str, Any]:
     """Generate target-SFT train/dev QA only from recorded reserved chains."""
     database_path = Path(database_path)
@@ -1059,7 +1168,10 @@ def generate_target_sft_qa(
             )
 
     immutable_paths = _immutable_evaluation_artifact_paths(qa_condition_dir)
-    immutable_hashes_before = _hash_artifacts(immutable_paths)
+    allow_empty_hops = config["experiment"]["name"] == "exp02_capacity_boundary"
+    immutable_hashes_before = _hash_artifacts(
+        immutable_paths, allow_empty_jsonl=allow_empty_hops
+    )
     evaluation_manifest_path = immutable_paths["split_manifest.json"]
     evaluation_manifest = read_json(evaluation_manifest_path)
     evaluation_manifest_sha256 = immutable_hashes_before["split_manifest.json"]
@@ -1077,8 +1189,11 @@ def generate_target_sft_qa(
         database_manifest=database_manifest,
         chain_count=len(chains),
     )
-    reserved_assignments = assign_reserved_target_sft_splits(
-        evaluation_manifest["reserved_chain_indices"]
+    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    reserved_assignments = (
+        assign_exp2_target_sft_splits(evaluation_manifest["reserved_chain_indices"])
+        if is_exp2
+        else assign_reserved_target_sft_splits(evaluation_manifest["reserved_chain_indices"])
     )
     if set(reserved_assignments["train"]) & set(reserved_assignments["dev"]):
         raise RuntimeError("target-SFT train and dev chains overlap")
@@ -1094,7 +1209,10 @@ def generate_target_sft_qa(
     split_audits: dict[str, dict[str, Any]] = {}
     for split in TARGET_SFT_SPLITS:
         candidates = generate_qa_candidates(
-            chains, reserved_assignments[split], split
+            chains,
+            reserved_assignments[split],
+            split,
+            exposed_positions=(set(database_manifest["selected_positions"]) if is_exp2 else None),
         )
         records, audit = filter_qa_candidates(candidates)
         _validate_split_record_schema(
@@ -1129,11 +1247,20 @@ def generate_target_sft_qa(
         "requested_N": database_manifest["requested_N"],
         "source_database_sha256": hash_file(database_path),
         "source_database_manifest_sha256": hash_file(database_manifest_path),
+        "source_dataset_manifest_sha256": hash_file(database_manifest_path),
         "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
         "sft_split_method": (
             "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev "
             "within each consecutive block of 10"
         ),
+        "selected_tables": database_manifest.get("selected_tables"),
+        "selected_positions": database_manifest.get("selected_positions"),
+        "source_training_data_dir": (
+            str(Path(source_training_data_dir).resolve())
+            if source_training_data_dir is not None
+            else database_manifest.get("artifact_path")
+        ),
+        "generation_timestamp": generation_timestamp,
     }
     split_manifests = {
         split: _write_target_sft_split(
@@ -1147,7 +1274,9 @@ def generate_target_sft_qa(
         for split in TARGET_SFT_SPLITS
     }
 
-    immutable_hashes_after = _hash_artifacts(immutable_paths)
+    immutable_hashes_after = _hash_artifacts(
+        immutable_paths, allow_empty_jsonl=allow_empty_hops
+    )
     if immutable_hashes_after != immutable_hashes_before:
         raise RuntimeError("immutable validation/test QA artifacts changed during generation")
     assignment_hashes = {
@@ -1163,6 +1292,9 @@ def generate_target_sft_qa(
         "source_database_sha256": base_manifest["source_database_sha256"],
         "source_database_manifest_sha256": base_manifest[
             "source_database_manifest_sha256"
+        ],
+        "source_dataset_manifest_sha256": base_manifest[
+            "source_dataset_manifest_sha256"
         ],
         "source_evaluation_split_manifest": "../split_manifest.json",
         "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
@@ -1191,6 +1323,10 @@ def generate_target_sft_qa(
         "target_qa_training_generated": True,
         "deterministic_generation": True,
         "runtime_llm_used": False,
+        "selected_tables": database_manifest.get("selected_tables"),
+        "selected_positions": database_manifest.get("selected_positions"),
+        "source_training_data_dir": base_manifest.get("source_training_data_dir"),
+        "generation_timestamp": generation_timestamp,
         "immutable_evaluation_artifact_hashes_before": immutable_hashes_before,
         "immutable_evaluation_artifact_hashes_after": immutable_hashes_after,
         "immutable_evaluation_artifacts_unchanged": True,

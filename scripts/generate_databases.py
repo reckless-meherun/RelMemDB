@@ -1,5 +1,7 @@
 import argparse
+import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -8,9 +10,26 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from data.materialize import build_database_manifest, materialize_database
-from data.serialize import serialize_database_cpt
-from data.world import build_master_world, build_master_world_manifest
+from data.materialize import (
+    build_database_manifest,
+    build_exp2_database_manifest,
+    materialize_database,
+    materialize_selected_tables_database,
+)
+from data.serialize import (
+    build_selected_readable_database_book,
+    database_schema_sha256,
+    serialize_database_cpt,
+)
+from data.world import (
+    SEMANTIC_ENTITY_SPECS,
+    build_master_world,
+    build_master_world_manifest,
+    build_world_for_chain_count,
+    facts_per_selected_chain,
+    validate_exp2_fact_count,
+    validate_selected_tables,
+)
 from experiment import ExperimentCondition
 from utils.hashing import hash_file
 from utils.io import read_json, write_json
@@ -19,6 +38,7 @@ from utils.paths import (
     database_condition_dir,
     n_sweep_database_dir,
     t_sweep_database_dir,
+    exp2_database_bundle_dir,
 )
 
 
@@ -210,6 +230,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--table-count", type=int, help="physical table count T")
     parser.add_argument(
+        "--tables",
+        nargs="+",
+        help="Experiment-2 canonical tables to expose (T is inferred)",
+    )
+    parser.add_argument(
         "--fact-count", type=int, help="experimental logical fact count N"
     )
     args = parser.parse_args()
@@ -221,17 +246,140 @@ def _parse_args() -> argparse.Namespace:
         parser.error(
             "--serialize-cpt-only cannot be combined with master-world generation"
         )
-    if (args.table_count is None) != (args.fact_count is None):
+    # Exp1 retains its paired T/N CLI. Exp2 validation is performed after loading
+    # the selected config so --fact-count may intentionally be omitted.
+    if args.tables is None and (args.table_count is None) != (args.fact_count is None):
         parser.error("--table-count and --fact-count must be supplied together")
     if args.serialize_cpt_only and args.table_count is None:
         parser.error("--serialize-cpt-only requires --table-count and --fact-count")
     return args
 
 
+def _resolve_project_path(path: str | Path) -> Path:
+    value = Path(path)
+    return (value if value.is_absolute() else PROJECT_ROOT / value).resolve()
+
+
+def _assert_canonical_prefix(
+    canonical_database: Path, generated_database: Path, prefix_rows: int
+) -> None:
+    """Prove every generated condition begins with the canonical logical rows."""
+    with sqlite3.connect(canonical_database) as canonical, sqlite3.connect(
+        generated_database
+    ) as generated:
+        table_names = [spec["entity_type"] for spec in SEMANTIC_ENTITY_SPECS]
+        for table in table_names:
+            expected = canonical.execute(
+                f'SELECT * FROM "{table}" ORDER BY rowid LIMIT ?', (prefix_rows,)
+            ).fetchall()
+            actual = generated.execute(
+                f'SELECT * FROM "{table}" ORDER BY rowid LIMIT ?', (prefix_rows,)
+            ).fetchall()
+            if len(expected) != prefix_rows or actual != expected:
+                raise RuntimeError(
+                    f"generated Experiment-2 rows do not preserve the canonical prefix for {table}"
+                )
+
+
+def _generate_exp2(config: dict, config_path: Path, args: argparse.Namespace) -> Path:
+    if not args.tables:
+        raise ValueError("Experiment 2 requires at least one table via --tables")
+    if args.table_count is not None:
+        raise ValueError("Experiment 2 infers T from --tables; do not pass --table-count")
+    if args.rebuild_master_world or args.master_world_only or args.serialize_cpt_only:
+        raise ValueError("Experiment 2 performs generation and serialization as one immutable bundle")
+    selected = validate_selected_tables(args.tables)
+    canonical_dir = _resolve_project_path(config["data"]["canonical_source"]["path"])
+    canonical_database = canonical_dir / "database.sqlite"
+    canonical_manifest_path = canonical_dir / "manifest.json"
+    for path, label in (
+        (canonical_database, "canonical database"),
+        (canonical_manifest_path, "canonical database manifest"),
+    ):
+        if not path.is_file() or path.stat().st_size == 0:
+            raise FileNotFoundError(f"{label} is missing or empty: {path}")
+    canonical_manifest = read_json(canonical_manifest_path)
+    canonical_database_hash_before = hash_file(canonical_database)
+    canonical_manifest_hash_before = hash_file(canonical_manifest_path)
+    if canonical_manifest.get("database_sha256") != canonical_database_hash_before:
+        raise ValueError("canonical database does not match its manifest hash")
+    canonical_schema_hash = database_schema_sha256(canonical_database)
+    baseline_chains = canonical_manifest.get("selected_chain_count")
+    if isinstance(baseline_chains, bool) or not isinstance(baseline_chains, int) or baseline_chains <= 0:
+        raise ValueError("canonical manifest selected_chain_count is invalid")
+    per_chain = facts_per_selected_chain(selected)
+    fact_count = baseline_chains * per_chain if args.fact_count is None else args.fact_count
+    chain_count = validate_exp2_fact_count(fact_count, selected)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    condition_dir = exp2_database_bundle_dir(selected, fact_count, timestamp)
+    if condition_dir.exists():
+        raise FileExistsError(f"refusing to overwrite Experiment-2 bundle: {condition_dir}")
+    condition_dir.mkdir(parents=True)
+    database_path = condition_dir / "database.sqlite"
+    manifest_path = condition_dir / "manifest.json"
+    world = build_world_for_chain_count(config, chain_count)
+    materialization = materialize_selected_tables_database(
+        world, selected, chain_count, database_path
+    )
+    _assert_canonical_prefix(
+        canonical_database, database_path, min(chain_count, baseline_chains)
+    )
+    generated_schema_hash = database_schema_sha256(database_path)
+    # Compute text statistics before sealing the database manifest. Serialization
+    # repeats this deterministic render and authenticates the final manifest hash.
+    readable_book, book_metadata = build_selected_readable_database_book(
+        database_path, materialization
+    )
+    materialization.update(
+        {
+            "artifact_path": str(condition_dir.resolve()),
+            "sentence_count": book_metadata["instance_sentence_count"]
+            + book_metadata["schema_description_sentence_count"],
+            "character_count": len(readable_book),
+            "byte_count": len(readable_book.encode("utf-8")),
+        }
+    )
+    manifest = build_exp2_database_manifest(
+        config,
+        materialization,
+        generation_timestamp=timestamp,
+        canonical_database_sha256=canonical_database_hash_before,
+        canonical_database_manifest_sha256=canonical_manifest_hash_before,
+        canonical_schema_sha256=canonical_schema_hash,
+        generated_schema_sha256=generated_schema_hash,
+        configuration_sha256=hash_file(config_path),
+        database_sha256=hash_file(database_path),
+    )
+    write_json(manifest_path, manifest)
+    _serialize_condition_cpt(
+        config=config,
+        condition_dir=condition_dir,
+        table_count=len(selected),
+        logical_fact_count=fact_count,
+    )
+    if (
+        hash_file(canonical_database) != canonical_database_hash_before
+        or hash_file(canonical_manifest_path) != canonical_manifest_hash_before
+        or database_schema_sha256(canonical_database) != canonical_schema_hash
+    ):
+        raise RuntimeError("canonical database or schema changed during Experiment-2 generation")
+    print(f"Experiment: {config['experiment']['name']}")
+    print(f"Selected tables: {' '.join(selected)}")
+    print(f"T: {len(selected)}")
+    print(f"Facts per selected chain: {per_chain}")
+    print(f"Rows/chains: {chain_count}")
+    print(f"N: {fact_count}")
+    print(f"Output: {condition_dir.relative_to(PROJECT_ROOT)}")
+    return condition_dir
+
+
 def main() -> None:
     args = _parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
+    if config["experiment"]["name"] == "exp02_capacity_boundary":
+        _generate_exp2(config, config_path, args)
+        return
     if args.serialize_cpt_only:
         _, condition_dir = _condition_destination(
             config, args.table_count, args.fact_count

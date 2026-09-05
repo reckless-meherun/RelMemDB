@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +14,13 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from experiment import ExperimentCondition, verify_checkpoint_layers
+from experiment import (
+    ExperimentCondition,
+    load_exp2_dataset_condition,
+    resolve_model_checkpoint,
+    verify_checkpoint_layers,
+)
+from utils.io import read_json
 from training.cpt import run_cpt_training
 from training.target_sft import run_target_sft_training
 from utils.paths import (
@@ -23,6 +30,8 @@ from utils.paths import (
     database_condition_dir,
     qa_reference_dir,
     target_sft_run_dir,
+    EXP02_RUNS_DIR,
+    exp2_artifact_stem,
 )
 
 
@@ -94,10 +103,13 @@ def build_target_sft_paths(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run RelMemDB model training")
     parser.add_argument("--stage", required=True, choices=("cpt", "target-sft"))
-    parser.add_argument("--table-count", required=True, type=int)
-    parser.add_argument("--fact-count", required=True, type=int)
-    parser.add_argument("--layers", required=True, type=int)
-    parser.add_argument("--source-checkpoint", required=True, type=Path)
+    parser.add_argument("--table-count", type=int)
+    parser.add_argument("--fact-count", type=int)
+    parser.add_argument("--layers", type=int)
+    parser.add_argument("--source-checkpoint", type=Path)
+    parser.add_argument("--training-data-dir", type=Path)
+    parser.add_argument("--sft-data-dir", type=Path)
+    parser.add_argument("--model")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     return parser.parse_args()
 
@@ -105,6 +117,17 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     config = load_config(args.config.resolve())
+    if config["experiment"]["name"] == "exp02_capacity_boundary":
+        _run_exp2(args, config)
+        return
+    missing = [
+        name for name, value in (
+            ("--table-count", args.table_count), ("--fact-count", args.fact_count),
+            ("--layers", args.layers), ("--source-checkpoint", args.source_checkpoint),
+        ) if value is None
+    ]
+    if missing:
+        raise SystemExit(f"ERROR: Experiment-1 training requires {', '.join(missing)}.")
     condition = ExperimentCondition.from_config(
         config,
         table_count=args.table_count,
@@ -167,6 +190,103 @@ def main() -> None:
         f"CPT complete: steps={summary['optimizer_steps']}, "
         f"loss={summary['training_loss']:.6f}, "
         f"checkpoint={summary['final_checkpoint_path']}"
+    )
+
+
+def _run_exp2(args: argparse.Namespace, config: dict) -> None:
+    model_name = args.model or config["model"].get("name", "gpt2")
+    config["model"]["name"] = model_name
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    config["_runtime"] = {"run_timestamp": timestamp}
+    if args.stage == "cpt":
+        if args.training_data_dir is None:
+            raise SystemExit("ERROR: --training-data-dir is required for Experiment-2 CPT training.")
+        if args.sft_data_dir is not None:
+            raise ValueError("--sft-data-dir is only valid for target-SFT training")
+        condition = load_exp2_dataset_condition(args.training_data_dir)
+        for supplied, actual, label in (
+            (args.table_count, condition["T"], "T/--table-count"),
+            (args.fact_count, condition["N"], "N/--fact-count"),
+        ):
+            if supplied is not None and supplied != actual:
+                raise ValueError(f"optional {label} assertion does not match the dataset manifest")
+        source_checkpoint, native_layers = resolve_model_checkpoint(
+            model_name, source_checkpoint=args.source_checkpoint
+        )
+        layers = native_layers if args.layers is None else args.layers
+        verify_checkpoint_layers(source_checkpoint, layers)
+        stem = exp2_artifact_stem(
+            model=model_name, table_count=condition["T"], fact_count=condition["N"],
+            layers=layers, timestamp=timestamp,
+        )
+        run_dir = EXP02_RUNS_DIR / stem / "cpt"
+        output_checkpoint = TRAINED_MODELS_DIR / stem
+        cpt_dir = condition["cpt_dir"]
+        summary = run_cpt_training(
+            config, table_count=condition["T"], fact_count=condition["N"],
+            layers=layers, source_checkpoint=source_checkpoint,
+            output_checkpoint=output_checkpoint,
+            run_config_path=run_dir / "run_config.yaml",
+            train_log_path=run_dir / "train_log.jsonl",
+            database_path=condition["database"],
+            database_manifest_path=condition["manifest_path"],
+            readable_book_path=cpt_dir / "book_readable.txt",
+            train_text_path=cpt_dir / "train.txt",
+            cpt_manifest_path=condition["cpt_manifest"],
+        )
+        print(
+            f"CPT complete: model={model_name}, T={condition['T']}, N={condition['N']}, "
+            f"L={layers}, steps={summary['optimizer_steps']}, checkpoint={output_checkpoint}"
+        )
+        return
+
+    if args.sft_data_dir is None:
+        raise SystemExit("ERROR: --sft-data-dir is required for target-SFT training.")
+    if args.source_checkpoint is None:
+        raise SystemExit("ERROR: --source-checkpoint is required for target-SFT training.")
+    sft_path = args.sft_data_dir
+    if not sft_path.is_absolute():
+        sft_path = PROJECT_ROOT / sft_path
+    sft_path = sft_path.resolve()
+    qa_condition_dir = sft_path.parent if sft_path.name == "target_sft" else sft_path
+    split_manifest_path = qa_condition_dir / "target_sft" / "split_manifest.json"
+    if not split_manifest_path.is_file():
+        raise FileNotFoundError(f"target-SFT manifest is missing: {split_manifest_path}")
+    split_manifest = read_json(split_manifest_path)
+    if split_manifest.get("experiment_name") != "exp02_capacity_boundary":
+        raise ValueError("--sft-data-dir is not an Experiment-2 SFT dataset")
+    table_count = split_manifest.get("T")
+    fact_count = split_manifest.get("requested_N")
+    for supplied, actual, label in (
+        (args.table_count, table_count, "T/--table-count"),
+        (args.fact_count, fact_count, "N/--fact-count"),
+    ):
+        if supplied is not None and supplied != actual:
+            raise ValueError(f"optional {label} assertion does not match the SFT manifest")
+    source_checkpoint = _resolve_source_checkpoint(args.source_checkpoint)
+    if not (source_checkpoint / "training_metadata.json").is_file():
+        raise FileNotFoundError(
+            "Experiment-2 target SFT requires an explicit CPT checkpoint with training_metadata.json"
+        )
+    _, native_layers = resolve_model_checkpoint(model_name, source_checkpoint=source_checkpoint)
+    layers = native_layers if args.layers is None else args.layers
+    verify_checkpoint_layers(source_checkpoint, layers)
+    stem = exp2_artifact_stem(
+        model=model_name, table_count=table_count, fact_count=fact_count,
+        layers=layers, timestamp=timestamp,
+    ) + "_sft"
+    run_dir = EXP02_RUNS_DIR / stem / "target_sft"
+    output_checkpoint = TRAINED_MODELS_DIR / stem
+    summary = run_target_sft_training(
+        config, table_count=table_count, fact_count=fact_count, layers=layers,
+        source_checkpoint=source_checkpoint, output_checkpoint=output_checkpoint,
+        run_config_path=run_dir / "run_config.yaml",
+        train_log_path=run_dir / "train_log.jsonl",
+        qa_condition_dir=qa_condition_dir,
+    )
+    print(
+        f"Target SFT complete: model={model_name}, T={table_count}, N={fact_count}, "
+        f"L={layers}, steps={summary['optimizer_steps']}, checkpoint={output_checkpoint}"
     )
 
 

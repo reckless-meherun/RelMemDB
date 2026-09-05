@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
-from experiment import verify_checkpoint_layers
+from experiment import configured_model_layers, verify_checkpoint_layers
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
 
@@ -106,6 +106,15 @@ def verify_cpt_artifacts(
         fact_count * fact_exposure
     ):
         raise CPTArtifactError("CPT serialized logical-fact accounting is inconsistent")
+    if database_manifest.get("experiment_mode") == "selected_canonical_tables":
+        if cpt_manifest.get("experiment_name") != database_manifest.get("experiment_name"):
+            raise CPTArtifactError("CPT experiment identity does not match the database")
+        if cpt_manifest.get("selected_tables") != database_manifest.get("selected_tables"):
+            raise CPTArtifactError("CPT selected tables do not match the database")
+        if cpt_manifest.get("facts_per_selected_chain") != database_manifest.get("facts_per_selected_chain"):
+            raise CPTArtifactError("CPT facts-per-selected-chain metadata is inconsistent")
+        if cpt_manifest.get("logical_content_sha256") != database_manifest.get("logical_content_sha256"):
+            raise CPTArtifactError("CPT logical-content provenance is inconsistent")
 
     readable_book_bytes = readable_book_path.read_bytes()
     train_bytes = train_text_path.read_bytes()
@@ -146,6 +155,10 @@ def verify_cpt_artifacts(
         "serialization_style": SERIALIZATION_STYLE,
         "readable_book_byte_count": len(readable_book_bytes),
         "train_text_byte_count": len(train_bytes),
+        "experiment_name": database_manifest.get("experiment_name"),
+        "selected_tables": database_manifest.get("selected_tables"),
+        "training_data_dir": str(database_manifest_path.parent.resolve()),
+        "logical_content_sha256": database_manifest.get("logical_content_sha256"),
     }
 
 
@@ -361,7 +374,7 @@ def build_cpt_training_plan(
         "stage": "cpt",
         "T": table_count,
         "N": fact_count,
-        "L": config["model"]["layers"] if layers is None else layers,
+        "L": configured_model_layers(config) if layers is None else layers,
         "seed": seed,
         "epochs": epochs,
         "passes_over_serialized_corpus": epochs,
@@ -502,7 +515,7 @@ def run_cpt_training(
         or not (source_checkpoint / "config.json").is_file()
     ):
         raise FileNotFoundError(f"source checkpoint is missing: {source_checkpoint}")
-    requested_layers = config["model"]["layers"] if layers is None else layers
+    requested_layers = configured_model_layers(config) if layers is None else layers
     layer_provenance = verify_checkpoint_layers(source_checkpoint, requested_layers)
     if source_checkpoint.resolve() == output_checkpoint.resolve():
         raise ValueError("source and final CPT checkpoint paths must differ")
@@ -530,6 +543,11 @@ def run_cpt_training(
         tokenizer,
         context_length=config["training"]["context_length"],
     )
+    book_token_count = len(
+        tokenizer.encode(read_text(readable_book_path), add_special_tokens=False)
+    )
+    token_statistics["book_token_count"] = book_token_count
+    token_statistics["train_token_count"] = token_statistics["total_tokens"]
     plan = build_cpt_training_plan(
         config,
         table_count=table_count,
@@ -608,6 +626,8 @@ def run_cpt_training(
     )
     run_record = {
         "experiment": config["experiment"]["name"],
+        "model": config["model"]["name"],
+        "run_timestamp": config.get("_runtime", {}).get("run_timestamp"),
         "T": table_count,
         "N": fact_count,
         "L": requested_layers,
@@ -615,6 +635,7 @@ def run_cpt_training(
             "table_count": table_count,
             "fact_count": fact_count,
             "layers": requested_layers,
+            "selected_tables": provenance.get("selected_tables"),
         },
         "source_checkpoint": str(source_checkpoint),
         "final_checkpoint_path": str(output_checkpoint),

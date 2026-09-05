@@ -19,6 +19,11 @@ EXP01_GENERATED_DATABASES_DIR = GENERATED_DATABASES_DIR / EXP01_NAME
 EXP01_QA_DIR = QA_DIR / EXP01_NAME
 EXP01_RUNS_DIR = RUNS_DIR / EXP01_NAME
 EXP01_RESULTS_DIR = RESULTS_DIR / EXP01_NAME
+EXP02_NAME = "exp02_capacity_boundary"
+EXP02_GENERATED_DATABASES_DIR = GENERATED_DATABASES_DIR / EXP02_NAME
+EXP02_QA_DIR = QA_DIR / EXP02_NAME
+EXP02_RUNS_DIR = RUNS_DIR / EXP02_NAME
+EXP02_RESULTS_DIR = RESULTS_DIR / EXP02_NAME
 
 
 def _positive_int(value: int, name: str) -> int:
@@ -149,3 +154,45 @@ def ensure_dir(path: str | Path) -> Path:
     directory = Path(path)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def safe_component(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-_")
+    if not normalized:
+        raise ValueError("path component is empty after sanitization")
+    return normalized
+
+
+def exp2_condition_label(
+    selected_tables: list[str] | tuple[str, ...], fact_count: int, timestamp: str
+) -> str:
+    if not selected_tables:
+        raise ValueError("selected_tables must not be empty")
+    if not re.fullmatch(r"\d{8}_\d{6}(?:_\d{6})?", timestamp):
+        raise ValueError("timestamp must use YYYYMMDD_HHMMSS[_ffffff]")
+    tables = "-".join(safe_component(table) for table in selected_tables)
+    return f"T{len(selected_tables):02d}_N{_positive_int(fact_count, 'fact_count')}_{tables}_{timestamp}"
+
+
+def exp2_database_bundle_dir(
+    selected_tables: list[str] | tuple[str, ...], fact_count: int, timestamp: str
+) -> Path:
+    return EXP02_GENERATED_DATABASES_DIR / exp2_condition_label(
+        selected_tables, fact_count, timestamp
+    )
+
+
+def exp2_qa_bundle_dir(
+    selected_tables: list[str] | tuple[str, ...], fact_count: int, timestamp: str
+) -> Path:
+    return EXP02_QA_DIR / exp2_condition_label(selected_tables, fact_count, timestamp)
+
+
+def exp2_artifact_stem(
+    *, model: str, table_count: int, fact_count: int, layers: int, timestamp: str
+) -> str:
+    return (
+        f"{safe_component(model)}_exp02_T{_positive_int(table_count, 'table_count'):02d}_"
+        f"N{_positive_int(fact_count, 'fact_count')}_L{_positive_int(layers, 'layers')}_"
+        f"{timestamp}"
+    )

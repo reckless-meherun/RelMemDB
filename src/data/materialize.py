@@ -2,7 +2,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from data.world import SEMANTIC_ENTITY_SPECS
+from data.world import (
+    SEMANTIC_ENTITY_SPECS,
+    facts_per_selected_chain,
+    selected_table_positions,
+    validate_selected_tables,
+)
 from utils.hashing import hash_json_object
 
 
@@ -291,6 +296,135 @@ def build_database_manifest(
             if key not in {"format_version", "requested_logical_fact_count"}
         },
         "master_world_sha256": master_world_sha256,
+        "configuration_sha256": configuration_sha256,
+        "database_sha256": database_sha256,
+    }
+
+
+def materialize_selected_tables_database(
+    world: dict[str, Any],
+    selected_tables: list[str] | tuple[str, ...],
+    selected_chain_count: int,
+    output_path: str | Path,
+) -> dict[str, Any]:
+    """Materialize Exp2 using the immutable 12-table schema plus hidden FK support."""
+    selected = validate_selected_tables(selected_tables)
+    if (
+        isinstance(selected_chain_count, bool)
+        or not isinstance(selected_chain_count, int)
+        or selected_chain_count <= 0
+    ):
+        raise ValueError("selected_chain_count must be a positive integer")
+    # The existing T=12 materializer is the canonical schema implementation.  Its
+    # full rows provide all transitive parents needed for FK integrity.
+    metadata = materialize_database(
+        world,
+        table_count=len(SEMANTIC_ENTITY_SPECS),
+        logical_fact_count=selected_chain_count * 40,
+        output_path=output_path,
+    )
+    positions = selected_table_positions(selected)
+    per_chain = facts_per_selected_chain(selected)
+    attribute_per_chain = sum(
+        len(SEMANTIC_ENTITY_SPECS[position]["attributes"])
+        for position in positions
+    )
+    relation_per_chain = sum(position > 0 for position in positions)
+    exposed_chains = [
+        {
+            "chain_index": chain["chain_index"],
+            "entities": [chain["entities"][position] for position in positions],
+            "relations": [
+                relation
+                for relation in chain["relations"]
+                if relation["source_position"] in positions
+            ],
+        }
+        for chain in world["chains"][:selected_chain_count]
+    ]
+    return {
+        **metadata,
+        "experiment_mode": "selected_canonical_tables",
+        "T": len(selected),
+        "table_count": len(selected),
+        "physical_table_count": len(SEMANTIC_ENTITY_SPECS),
+        "selected_tables": list(selected),
+        "selected_positions": list(positions),
+        "support_tables": [
+            spec["entity_type"]
+            for position, spec in enumerate(SEMANTIC_ENTITY_SPECS)
+            if position not in positions
+        ],
+        "facts_per_selected_chain": per_chain,
+        "experimental_facts_per_chain": per_chain,
+        "attribute_facts_per_chain": attribute_per_chain,
+        "relation_facts_per_chain": relation_per_chain,
+        "requested_logical_fact_count": selected_chain_count * per_chain,
+        "actual_logical_fact_count": selected_chain_count * per_chain,
+        "attribute_fact_count": selected_chain_count * attribute_per_chain,
+        "relation_fact_count": selected_chain_count * relation_per_chain,
+        "identifier_fields_per_chain": len(selected),
+        "identifier_field_count": selected_chain_count * len(selected),
+        "schema_column_count": per_chain + len(selected),
+        "schema_foreign_key_count": relation_per_chain,
+        "physical_schema_column_count": 52,
+        "physical_schema_foreign_key_count": 11,
+        "identifiers_counted_as_experimental_facts": False,
+        "physical_row_count": selected_chain_count * len(SEMANTIC_ENTITY_SPECS),
+        "exposed_row_count": selected_chain_count * len(selected),
+        "rows_per_table": {
+            spec["entity_type"]: selected_chain_count
+            for spec in SEMANTIC_ENTITY_SPECS
+        },
+        "exposed_rows_per_table": {
+            table: selected_chain_count for table in selected
+        },
+        "row_counts": {
+            table: selected_chain_count for table in selected
+        },
+        "hidden_support_rows_per_table": {
+            spec["entity_type"]: selected_chain_count
+            for position, spec in enumerate(SEMANTIC_ENTITY_SPECS)
+            if position not in positions
+        },
+        "identifier_count": selected_chain_count * len(selected),
+        "position_partition": [[position] for position in range(len(SEMANTIC_ENTITY_SPECS))],
+        "logical_content_sha256": hash_json_object(exposed_chains),
+    }
+
+
+def build_exp2_database_manifest(
+    config: dict[str, Any],
+    materialization: dict[str, Any],
+    *,
+    generation_timestamp: str,
+    canonical_database_sha256: str,
+    canonical_database_manifest_sha256: str,
+    canonical_schema_sha256: str,
+    generated_schema_sha256: str,
+    configuration_sha256: str,
+    database_sha256: str,
+) -> dict[str, Any]:
+    if canonical_schema_sha256 != generated_schema_sha256:
+        raise ValueError("generated Experiment-2 schema differs from the canonical schema")
+    return {
+        "format_version": DATABASE_FORMAT_VERSION + 1,
+        "experiment_name": config["experiment"]["name"],
+        "experiment_mode": "selected_canonical_tables",
+        "generation_timestamp": generation_timestamp,
+        "T": materialization["T"],
+        "N": materialization["actual_logical_fact_count"],
+        "requested_N": materialization["requested_logical_fact_count"],
+        **{
+            key: value
+            for key, value in materialization.items()
+            if key not in {"format_version", "requested_logical_fact_count", "T"}
+        },
+        "seed": config["experiment"]["seed"],
+        "canonical_source_database_sha256": canonical_database_sha256,
+        "canonical_source_database_manifest_sha256": canonical_database_manifest_sha256,
+        "canonical_schema_sha256": canonical_schema_sha256,
+        "generated_schema_sha256": generated_schema_sha256,
         "configuration_sha256": configuration_sha256,
         "database_sha256": database_sha256,
     }

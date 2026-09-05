@@ -174,6 +174,138 @@ def _unique_natural_name(
     raise RuntimeError(f"natural-name namespace is exhausted for {field}")
 
 
+def canonical_table_names() -> tuple[str, ...]:
+    return tuple(spec["entity_type"] for spec in SEMANTIC_ENTITY_SPECS)
+
+
+def validate_selected_tables(tables: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(tables, (list, tuple)) or not tables:
+        raise ValueError("at least one canonical table must be supplied with --tables")
+    if any(not isinstance(table, str) or not table for table in tables):
+        raise ValueError("selected table names must be non-empty strings")
+    duplicates = sorted({table for table in tables if tables.count(table) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate selected table names: {duplicates}")
+    valid = canonical_table_names()
+    invalid = [table for table in tables if table not in valid]
+    if invalid:
+        raise ValueError(
+            f"unknown canonical table(s): {invalid}; valid tables are {list(valid)}"
+        )
+    if len(tables) > len(valid):
+        raise ValueError(f"no more than {len(valid)} canonical tables may be selected")
+    # Canonical order makes content and path identity independent of CLI ordering.
+    selected = set(tables)
+    return tuple(table for table in valid if table in selected)
+
+
+def selected_table_positions(tables: list[str] | tuple[str, ...]) -> tuple[int, ...]:
+    selected = set(validate_selected_tables(tables))
+    return tuple(
+        position
+        for position, spec in enumerate(SEMANTIC_ENTITY_SPECS)
+        if spec["entity_type"] in selected
+    )
+
+
+def facts_per_selected_chain(tables: list[str] | tuple[str, ...]) -> int:
+    positions = selected_table_positions(tables)
+    return sum(
+        len(SEMANTIC_ENTITY_SPECS[position]["attributes"]) + (position > 0)
+        for position in positions
+    )
+
+
+def validate_exp2_fact_count(
+    fact_count: int, tables: list[str] | tuple[str, ...]
+) -> int:
+    if isinstance(fact_count, bool) or not isinstance(fact_count, int) or fact_count <= 0:
+        raise ValueError("N/--fact-count must be a positive integer")
+    selected = validate_selected_tables(tables)
+    per_chain = facts_per_selected_chain(selected)
+    quotient, remainder = divmod(fact_count, per_chain)
+    if remainder:
+        lower = fact_count - remainder
+        upper = lower + per_chain
+        raise ValueError(
+            f"Requested N={fact_count} cannot be represented exactly for selected "
+            f"tables {list(selected)} because each generated chain contributes "
+            f"{per_chain} exposed logical facts. Nearest valid values are "
+            f"{lower if lower > 0 else per_chain} and {upper}."
+        )
+    return quotient
+
+
+def build_world_for_chain_count(
+    config: dict[str, Any], chain_count: int
+) -> dict[str, Any]:
+    """Build a prefix-stable world of an explicit size for Experiment 2."""
+    if isinstance(chain_count, bool) or not isinstance(chain_count, int) or chain_count <= 0:
+        raise ValueError("chain_count must be a positive integer")
+    seed = config["experiment"]["seed"]
+    used_identifiers: set[str] = set()
+    used_numeric_suffixes: set[str] = set()
+    used_natural_names = {field: set() for field in NATURAL_IDENTIFIER_FIELDS.values()}
+    chains: list[dict[str, Any]] = []
+    for index in range(chain_count):
+        if index < 1_000:
+            chain = _build_chain(
+                seed, index, used_identifiers, used_numeric_suffixes, used_natural_names
+            )
+        else:
+            # Preserve all historical prefixes, then enter an unbounded, injective
+            # namespace.  Natural anchors remain readable and globally unique.
+            entities = []
+            for position, spec in enumerate(SEMANTIC_ENTITY_SPECS):
+                attributes = []
+                natural_field = NATURAL_IDENTIFIER_FIELDS.get(spec["entity_type"])
+                for field, _ in spec["attributes"]:
+                    value = (
+                        f"{_natural_name_candidate(field, seed, index, 0)} Record {index + 1}"
+                        if field == natural_field
+                        else _attribute_value(field, seed, index)
+                    )
+                    attributes.append({"name": field, "value": value})
+                entities.append(
+                    {
+                        "position": position,
+                        "entity_type": spec["entity_type"],
+                        "entity_id": f"{spec['id_prefix']}{1_000_000 + index * len(SEMANTIC_ENTITY_SPECS) + position}",
+                        "attributes": attributes,
+                    }
+                )
+            relations = [
+                {
+                    "relation_type": "references_parent",
+                    "source_position": position,
+                    "target_position": position - 1,
+                    "source_entity_id": entities[position]["entity_id"],
+                    "target_entity_id": entities[position - 1]["entity_id"],
+                }
+                for position in range(1, len(entities))
+            ]
+            chain = {"chain_index": index, "entities": entities, "relations": relations}
+        chains.append(chain)
+    _validate_world_uniqueness(chains)
+    return {
+        "format_version": FORMAT_VERSION,
+        "experiment_name": config["experiment"]["name"],
+        "seed": seed,
+        "construction": {
+            "schema_topology": "chain",
+            "latent_positions": 12,
+            "identifier_fields_per_chain": 12,
+            "attribute_facts_per_chain": 29,
+            "relation_facts_per_chain": 11,
+            "experimental_facts_per_chain": 40,
+            "total_chains": chain_count,
+            "total_experimental_facts": chain_count * 40,
+            "maximum_supported_configured_n": chain_count * 40,
+        },
+        "chains": chains,
+    }
+
+
 def _attribute_value(field: str, seed: int, chain_index: int) -> str | int:
     discipline = _choice(_DISCIPLINES, seed, field, chain_index, "discipline")
     topic = _choice(_TOPICS, seed, field, chain_index, "topic")

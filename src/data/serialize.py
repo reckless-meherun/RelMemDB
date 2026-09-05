@@ -41,7 +41,7 @@ SCHEMA_RELATION_DESCRIPTIONS = (
 )
 
 RAW_ENTITY_IDENTIFIER = re.compile(
-    r"\b(?:CTN|CTR|REG|CTY|CAM|SCH|DEP|SUB|CRS|OFF|ENR|STU)\d{6}\b"
+    r"\b(?:CTN|CTR|REG|CTY|CAM|SCH|DEP|SUB|CRS|OFF|ENR|STU)\d+\b"
 )
 
 
@@ -157,6 +157,15 @@ def inspect_database_schema(connection: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+def database_schema_sha256(database_path: str | Path) -> str:
+    path = Path(database_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"database file is missing or empty: {path}")
+    with sqlite3.connect(path) as connection:
+        schema = inspect_database_schema(connection)
+    return hash_json_object(schema)
+
+
 def _physical_table_name(positions: list[int]) -> str:
     return "__".join(
         SEMANTIC_ENTITY_SPECS[position]["entity_type"] for position in positions
@@ -215,7 +224,10 @@ def _validated_position_partition(
     partition = database_manifest.get("position_partition")
     if not isinstance(partition, list) or not partition:
         raise ValueError("database manifest position_partition is missing or invalid")
-    if len(partition) != database_manifest.get("table_count"):
+    expected_physical_tables = database_manifest.get(
+        "physical_table_count", database_manifest.get("table_count")
+    )
+    if len(partition) != expected_physical_tables:
         raise ValueError("database manifest position partition does not match T")
     if not all(
         isinstance(group, list)
@@ -685,6 +697,112 @@ def build_readable_database_book(
     return book, metadata
 
 
+def build_selected_readable_database_book(
+    database_path: str | Path,
+    database_manifest: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Serialize only Exp2's explicitly exposed canonical tables and facts."""
+    physical_groups, entities_by_position, metadata = read_semantic_database(
+        database_path, database_manifest
+    )
+    selected_positions = database_manifest.get("selected_positions")
+    selected_tables = database_manifest.get("selected_tables")
+    if (
+        not isinstance(selected_positions, list)
+        or not selected_positions
+        or not isinstance(selected_tables, list)
+        or len(selected_positions) != len(selected_tables)
+    ):
+        raise ValueError("Experiment-2 manifest selected-table metadata is invalid")
+    if selected_tables != [
+        SEMANTIC_ENTITY_SPECS[position]["entity_type"] for position in selected_positions
+    ]:
+        raise ValueError("Experiment-2 selected tables and positions disagree")
+
+    lines = ["The Academic Database Book", ""]
+    lines.extend(SCHEMA_ENTITY_DESCRIPTIONS[position] for position in selected_positions)
+    relation_description_positions = [position for position in selected_positions if position > 0]
+    if relation_description_positions:
+        lines.append("")
+        lines.extend(
+            SCHEMA_RELATION_DESCRIPTIONS[position - 1]
+            for position in relation_description_positions
+        )
+    covered_facts: list[tuple[str, ...]] = []
+    instance_sentence_count = 0
+    record_groups: list[dict[str, Any]] = []
+    for position in selected_positions:
+        entity_type = SEMANTIC_ENTITY_SPECS[position]["entity_type"]
+        lines.extend(("", _group_heading([entity_type]), ""))
+        entities = list(entities_by_position[position].values())
+        for entity in entities:
+            sentences, coverage = _render_entity_facts(entity, entities_by_position)
+            lines.extend(sentences)
+            covered_facts.extend(coverage)
+            instance_sentence_count += len(sentences)
+            lines.append("")
+        record_groups.append(
+            {
+                "group_index": len(record_groups) + 1,
+                "physical_table": entity_type,
+                "semantic_positions": [position],
+                "entity_types": [entity_type],
+                "row_count": len(entities),
+            }
+        )
+    book = "\n".join(lines).rstrip() + "\n"
+    expected_facts = []
+    for position in selected_positions:
+        for entity in entities_by_position[position].values():
+            expected_facts.extend(
+                _attribute_fact(entity, field) for field in entity["attributes"]
+            )
+            if position > 0:
+                expected_facts.append(_relation_fact(entity))
+    if Counter(covered_facts) != Counter(expected_facts):
+        raise RuntimeError("selected-table serialization did not cover exposed facts exactly once")
+    raw_identifier = RAW_ENTITY_IDENTIFIER.search(book)
+    if raw_identifier:
+        raise RuntimeError(f"natural-language serialization exposed identifier {raw_identifier.group(0)}")
+    attribute_count = sum(fact[0] == "attribute" for fact in expected_facts)
+    relation_count = len(expected_facts) - attribute_count
+    expected_n = database_manifest.get(
+        "requested_N", database_manifest.get("requested_logical_fact_count")
+    )
+    if len(expected_facts) != expected_n:
+        raise RuntimeError(
+            f"selected-table serialization covered {len(expected_facts)} facts, expected N={expected_n}"
+        )
+    metadata.update(
+        {
+            "table_count": len(selected_positions),
+            "logical_fact_occurrences": len(expected_facts),
+            "attribute_fact_occurrences": attribute_count,
+            "relation_fact_occurrences": relation_count,
+            "logical_fact_coverage_sha256": hash_json_object(sorted(expected_facts)),
+            "logical_entity_count": sum(
+                len(entities_by_position[position]) for position in selected_positions
+            ),
+            "source_identifier_count": sum(
+                len(entities_by_position[position]) for position in selected_positions
+            ),
+            "instance_sentence_count": instance_sentence_count,
+            "schema_description_sentence_count": len(selected_positions) + len(relation_description_positions),
+            "record_organization_sentence_count": 0,
+            "physical_record_groups": record_groups,
+            "experimental_schema_column_count": database_manifest["facts_per_selected_chain"],
+            "identifier_schema_column_count": len(selected_positions),
+            "schema_relationship_count": len(relation_description_positions),
+            "schema_foreign_key_count": len(relation_description_positions),
+            "schema_cross_table_foreign_key_count": len(relation_description_positions),
+            "schema_intra_table_relation_count": 0,
+            "total_schema_column_count": database_manifest["facts_per_selected_chain"] + len(selected_positions),
+            "physical_row_count": database_manifest["exposed_row_count"],
+        }
+    )
+    return book, metadata
+
+
 def serialize_database_cpt(
     config: dict[str, Any],
     database_path: str | Path,
@@ -746,15 +864,17 @@ def serialize_database_cpt(
             f"N={expected_logical_fact_count}"
         )
 
-    readable_book, metadata = build_readable_database_book(
-        database_path, database_manifest
-    )
+    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    builder = build_selected_readable_database_book if is_exp2 else build_readable_database_book
+    readable_book, metadata = builder(database_path, database_manifest)
     expected = {
         "table_count": table_count,
         "logical_fact_occurrences": requested_n,
         "attribute_fact_occurrences": database_manifest.get("attribute_fact_count"),
         "relation_fact_occurrences": database_manifest.get("relation_fact_count"),
-        "physical_row_count": database_manifest.get("physical_row_count"),
+        "physical_row_count": database_manifest.get(
+            "exposed_row_count" if is_exp2 else "physical_row_count"
+        ),
         "source_identifier_count": database_manifest.get("identifier_field_count"),
         "total_schema_column_count": database_manifest.get("schema_column_count"),
         "experimental_schema_column_count": database_manifest.get(
@@ -769,11 +889,12 @@ def serialize_database_cpt(
         "schema_foreign_key_count": database_manifest.get(
             "schema_foreign_key_count"
         ),
-        "schema_cross_table_foreign_key_count": database_manifest.get(
-            "cross_table_fk_edge_count"
+        "schema_cross_table_foreign_key_count": (
+            database_manifest.get("relation_facts_per_chain")
+            if is_exp2 else database_manifest.get("cross_table_fk_edge_count")
         ),
-        "schema_intra_table_relation_count": database_manifest.get(
-            "intra_table_fk_edge_count"
+        "schema_intra_table_relation_count": (
+            0 if is_exp2 else database_manifest.get("intra_table_fk_edge_count")
         ),
     }
     for key, expected_value in expected.items():
@@ -797,6 +918,9 @@ def serialize_database_cpt(
         "T": table_count,
         "requested_N": requested_n,
         "logical_content_sha256": database_manifest["logical_content_sha256"],
+        "selected_tables": database_manifest.get("selected_tables"),
+        "facts_per_selected_chain": database_manifest.get("facts_per_selected_chain"),
+        "selected_chain_count": database_manifest.get("selected_chain_count"),
         "source_database_sha256": database_sha256,
         "source_database_manifest_sha256": hash_file(database_manifest_path),
         "fact_exposure": fact_exposure,
@@ -852,6 +976,9 @@ def serialize_database_cpt(
         "readable_book_byte_count": len(readable_book.encode("utf-8")),
         "readable_book_character_count": len(readable_book),
         "readable_book_line_count": readable_book.count("\n"),
+        "sentence_count": metadata["instance_sentence_count"] + metadata["schema_description_sentence_count"],
+        "character_count": len(readable_book),
+        "byte_count": len(readable_book.encode("utf-8")),
         "train_text_sha256": hash_text(train_text),
         "train_text_byte_count": len(train_text.encode("utf-8")),
         "train_text_character_count": len(train_text),

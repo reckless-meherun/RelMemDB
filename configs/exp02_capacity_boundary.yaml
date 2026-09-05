@@ -1,0 +1,79 @@
+experiment:
+  name: exp02_capacity_boundary
+  seed: 2025
+
+model:
+  name: gpt2
+  native_layers: 12
+  hidden_size: 768
+  attention_heads: 12
+  context_length: 256
+  precision: bf16
+
+data:
+  schema_topology: chain
+  canonical_source:
+    path: datasets/generated_databases/exp01_first_feasibility/t_sweep_N10K/T12
+  master_world:
+    latent_positions: 12
+    descriptive_facts_per_chain: 29
+    relation_facts_per_chain: 11
+    experimental_facts_per_chain: 40
+    identifier_fields_per_chain: 12
+
+training:
+  fact_exposure: 4
+  cpt_batch_size: 32
+  cpt_epochs: 20
+  gradient_accumulation_steps: 1
+  optimizer: adamw
+  learning_rate: 3.0e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  epsilon: 1.0e-8
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  context_length: 512
+  precision: bf16
+  shuffle: true
+  gradient_checkpointing: false
+  fused_optimizer: true
+  dataloader_workers: 2
+  pin_memory: true
+  drop_last: false
+
+target_sft:
+  dataset_dir: target_sft
+  training_split: train
+  dev_split: dev
+  early_stopping_patience: 3
+  batch_size: 32
+  gradient_accumulation_steps: 1
+  epochs: 10
+  context_length: 128
+  optimizer: adamw
+  learning_rate: 2.0e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  epsilon: 1.0e-8
+  scheduler: cosine
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  precision: bf16
+  shuffle: true
+  gradient_checkpointing: false
+  fused_optimizer: true
+  dataloader_workers: 2
+  pin_memory: true
+  drop_last: false
+  answer_only_loss: true
+  supervise_eos: true
+
+evaluation:
+  decoding: greedy
+  temperature: 0.0
+  primary_metric: normalized_exact_match
+  batch_size: 32
+  context_length: 256
+  max_new_tokens: 64

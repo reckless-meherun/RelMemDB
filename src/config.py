@@ -20,6 +20,8 @@ REQUIRED_SECTIONS = {
     "layer_study",
 }
 
+EXP02_NAME = "exp02_capacity_boundary"
+
 
 class ConfigError(ValueError):
     """Raised when an experiment configuration is structurally invalid."""
@@ -69,6 +71,10 @@ def _required(section: dict[str, Any], key: str, section_name: str) -> Any:
 
 
 def validate_config(config: dict[str, Any]) -> None:
+    experiment_value = config.get("experiment")
+    if isinstance(experiment_value, dict) and experiment_value.get("name") == EXP02_NAME:
+        _validate_exp02_config(config)
+        return
     missing = sorted(REQUIRED_SECTIONS - config.keys())
     if missing:
         raise ConfigError(f"missing required configuration sections: {', '.join(missing)}")
@@ -602,6 +608,95 @@ def validate_config(config: dict[str, Any]) -> None:
         "layer_study.layers",
         allow_zero=False,
     )
+
+
+def _validate_exp02_config(config: dict[str, Any]) -> None:
+    """Validate Exp2 without importing Exp1's fixed T/N sweep assumptions."""
+    required = {"experiment", "model", "data", "training", "target_sft", "evaluation"}
+    missing = sorted(required - config.keys())
+    if missing:
+        raise ConfigError(f"missing required configuration sections: {', '.join(missing)}")
+    experiment = _require_mapping(config["experiment"], "experiment")
+    model = _require_mapping(config["model"], "model")
+    data = _require_mapping(config["data"], "data")
+    training = _require_mapping(config["training"], "training")
+    target_sft = _require_mapping(config["target_sft"], "target_sft")
+    evaluation = _require_mapping(config["evaluation"], "evaluation")
+    if experiment.get("name") != EXP02_NAME:
+        raise ConfigError(f"experiment.name must be {EXP02_NAME}")
+    _require_non_negative_int(_required(experiment, "seed", "experiment"), "experiment.seed")
+    for key in ("name", "precision"):
+        value = _required(model, key, "model")
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"model.{key} must be a non-empty string")
+    for key in ("native_layers", "hidden_size", "attention_heads", "context_length"):
+        _require_positive_int(_required(model, key, "model"), f"model.{key}")
+    if "t_sweep" in data or "n_sweep" in data:
+        raise ConfigError("Experiment 2 must not define fixed T or N sweep arrays")
+    if data.get("schema_topology") != "chain":
+        raise ConfigError("data.schema_topology must be chain")
+    construction = _require_mapping(_required(data, "master_world", "data"), "data.master_world")
+    expected = {
+        "latent_positions": 12,
+        "descriptive_facts_per_chain": 29,
+        "relation_facts_per_chain": 11,
+        "experimental_facts_per_chain": 40,
+        "identifier_fields_per_chain": 12,
+    }
+    for key, expected_value in expected.items():
+        if _require_positive_int(_required(construction, key, "data.master_world"), f"data.master_world.{key}") != expected_value:
+            raise ConfigError(f"data.master_world.{key} must be {expected_value}")
+    canonical = _require_mapping(_required(data, "canonical_source", "data"), "data.canonical_source")
+    path = _required(canonical, "path", "data.canonical_source")
+    if not isinstance(path, str) or not path.strip():
+        raise ConfigError("data.canonical_source.path must be a non-empty string")
+
+    # Exp2 deliberately reuses the proven optimization/evaluation semantics.  Keep
+    # this validation compact and focused on fields consumed by the shared code.
+    for key in ("fact_exposure", "cpt_batch_size", "cpt_epochs", "gradient_accumulation_steps", "context_length"):
+        _require_positive_int(_required(training, key, "training"), f"training.{key}")
+    for key in ("dataloader_workers",):
+        _require_non_negative_int(_required(training, key, "training"), f"training.{key}")
+    for key in ("shuffle", "gradient_checkpointing", "fused_optimizer", "pin_memory", "drop_last"):
+        _require_bool(_required(training, key, "training"), f"training.{key}")
+    for key in ("learning_rate", "epsilon", "max_grad_norm"):
+        if _require_number(_required(training, key, "training"), f"training.{key}") <= 0:
+            raise ConfigError(f"training.{key} must be positive")
+    if _require_number(_required(training, "weight_decay", "training"), "training.weight_decay") < 0:
+        raise ConfigError("training.weight_decay must be non-negative")
+    warmup = _require_number(_required(training, "warmup_ratio", "training"), "training.warmup_ratio")
+    if not 0 <= warmup <= 1:
+        raise ConfigError("training.warmup_ratio must be between 0 and 1")
+    betas = _required(training, "betas", "training")
+    if not isinstance(betas, list) or len(betas) != 2:
+        raise ConfigError("training.betas must contain exactly two numbers")
+    for key in ("optimizer", "scheduler", "precision"):
+        if not isinstance(_required(training, key, "training"), str):
+            raise ConfigError(f"training.{key} must be text")
+
+    if target_sft.get("dataset_dir") != "target_sft" or target_sft.get("training_split") != "train" or target_sft.get("dev_split") != "dev":
+        raise ConfigError("Experiment-2 target_sft must use target_sft/train and target_sft/dev")
+    for key in ("batch_size", "gradient_accumulation_steps", "epochs", "context_length", "early_stopping_patience"):
+        _require_positive_int(_required(target_sft, key, "target_sft"), f"target_sft.{key}")
+    for key in ("dataloader_workers",):
+        _require_non_negative_int(_required(target_sft, key, "target_sft"), f"target_sft.{key}")
+    for key in ("shuffle", "gradient_checkpointing", "fused_optimizer", "pin_memory", "drop_last", "answer_only_loss", "supervise_eos"):
+        _require_bool(_required(target_sft, key, "target_sft"), f"target_sft.{key}")
+    if target_sft["drop_last"] or not target_sft["answer_only_loss"] or not target_sft["supervise_eos"]:
+        raise ConfigError("target SFT requires drop_last=false, answer_only_loss=true, supervise_eos=true")
+    for key in ("learning_rate", "epsilon", "max_grad_norm"):
+        if _require_number(_required(target_sft, key, "target_sft"), f"target_sft.{key}") <= 0:
+            raise ConfigError(f"target_sft.{key} must be positive")
+    if _require_number(_required(target_sft, "weight_decay", "target_sft"), "target_sft.weight_decay") < 0:
+        raise ConfigError("target_sft.weight_decay must be non-negative")
+    for key in ("betas", "optimizer", "scheduler", "precision", "warmup_ratio"):
+        _required(target_sft, key, "target_sft")
+    for key in ("batch_size", "context_length", "max_new_tokens"):
+        _require_positive_int(_required(evaluation, key, "evaluation"), f"evaluation.{key}")
+    if evaluation.get("decoding") != "greedy" or evaluation.get("temperature") != 0.0:
+        raise ConfigError("Experiment-2 evaluation must use greedy decoding at temperature 0")
+    if evaluation.get("primary_metric") != "normalized_exact_match":
+        raise ConfigError("evaluation.primary_metric must be normalized_exact_match")
 
 
 def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:

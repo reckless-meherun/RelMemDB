@@ -18,7 +18,7 @@ from evaluation.inference import (
     generate_prediction_records,
 )
 from evaluation.metrics import compute_evaluation_metrics
-from experiment import qa_reference_values, verify_checkpoint_layers
+from experiment import configured_model_layers, qa_reference_values, verify_checkpoint_layers
 from training.cpt import enable_full_parameter_training
 from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json, read_jsonl, write_json, write_jsonl, write_yaml
@@ -49,8 +49,10 @@ REQUIRED_CROSS_PARTITION_PAIRS = {
 }
 
 
-def _require_nonempty_file(path: Path, label: str) -> Path:
-    if not path.is_file() or path.stat().st_size == 0:
+def _require_nonempty_file(
+    path: Path, label: str, *, allow_empty: bool = False
+) -> Path:
+    if not path.is_file() or (path.stat().st_size == 0 and not allow_empty):
         raise FileNotFoundError(f"{label} is missing or empty: {path}")
     return path
 
@@ -151,7 +153,15 @@ def _load_authenticated_target_sft_split(
         "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
         "question_template_version": split_manifest.get("question_template_version"),
         "zero_context": True,
+        "selected_tables": split_manifest.get("selected_tables"),
+        "selected_positions": split_manifest.get("selected_positions"),
+        "source_training_data_dir": split_manifest.get("source_training_data_dir"),
+        "generation_timestamp": split_manifest.get("generation_timestamp"),
     }
+    if split_manifest.get("experiment_name") == "exp02_capacity_boundary":
+        expected_metadata["source_dataset_manifest_sha256"] = split_manifest.get(
+            "source_dataset_manifest_sha256"
+        )
     for key, expected in expected_metadata.items():
         if manifest.get(key) != expected:
             raise ValueError(f"target-SFT {split} manifest {key} is inconsistent")
@@ -167,7 +177,12 @@ def _load_authenticated_target_sft_split(
     seen_ids: set[str] = set()
     for hop, hop_name in enumerate(HOP_NAMES):
         path = _require_nonempty_file(
-            dataset_path / split / f"{hop_name}.jsonl", f"target-SFT {split} {hop_name}"
+            dataset_path / split / f"{hop_name}.jsonl",
+            f"target-SFT {split} {hop_name}",
+            allow_empty=(
+                split_manifest.get("experiment_name") == "exp02_capacity_boundary"
+                and counts.get(hop_name, {}).get("final_retained_count") == 0
+            ),
         )
         actual_hash = hash_file(path)
         if output_hashes.get(path.name) != actual_hash:
@@ -238,6 +253,132 @@ def load_target_sft_dataset(
     )
     split_manifest_sha256 = hash_file(split_manifest_path)
     split_manifest = read_json(split_manifest_path)
+    if split_manifest.get("experiment_name") == "exp02_capacity_boundary":
+        expected_root = {
+            "format_version": 2,
+            "T": table_count,
+            "N": fact_count,
+            "requested_N": fact_count,
+            "source_evaluation_split_manifest": "../split_manifest.json",
+            "question_template_version": "semantic_academic_closed_book_v1",
+            "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+            "zero_context": True,
+            "target_qa_training_generated": True,
+            "deterministic_generation": True,
+            "runtime_llm_used": False,
+            "immutable_evaluation_artifacts_unchanged": True,
+        }
+        for key, expected in expected_root.items():
+            if split_manifest.get(key) != expected:
+                raise ValueError(f"Experiment-2 target-SFT split manifest {key} is inconsistent")
+        selected = split_manifest.get("selected_tables")
+        if not isinstance(selected, list) or len(selected) != table_count:
+            raise ValueError("Experiment-2 target-SFT selected-table metadata is invalid")
+        if split_manifest.get("source_dataset_manifest_sha256") != split_manifest.get(
+            "source_database_manifest_sha256"
+        ):
+            raise ValueError("Experiment-2 source dataset-manifest provenance is inconsistent")
+        assignments = {
+            split: split_manifest.get(f"{split}_chain_indices")
+            for split in ("train", "dev")
+        }
+        for split, indices in assignments.items():
+            if not isinstance(indices, list) or len(indices) != split_manifest.get(f"{split}_chain_count"):
+                raise ValueError(f"Experiment-2 target-SFT {split} chain assignment is invalid")
+            expected_hash = hash_json_object(indices)
+            if (
+                split_manifest.get(f"{split}_chain_indices_sha256") != expected_hash
+                or split_manifest.get("chain_assignment_hashes", {}).get(split) != expected_hash
+            ):
+                raise ValueError(f"Experiment-2 target-SFT {split} chain assignment hash is invalid")
+        if split_manifest.get("target_sft_chain_assignments_sha256") != hash_json_object(assignments):
+            raise ValueError("Experiment-2 target-SFT combined chain assignment hash is invalid")
+        partition_sets = {
+            "train": set(assignments["train"]),
+            "dev": set(assignments["dev"]),
+            "validation": set(split_manifest.get("validation_chain_indices", [])),
+            "test": set(split_manifest.get("test_chain_indices", [])),
+        }
+        if any(
+            partition_sets[left] & partition_sets[right]
+            for index, left in enumerate(partition_sets)
+            for right in list(partition_sets)[index + 1 :]
+        ):
+            raise ValueError("Experiment-2 target-SFT chain partitions overlap")
+        for audit_field in (
+            "chain_overlap_counts", "qa_id_overlap_counts", "question_overlap_counts",
+            "exact_question_overlap_counts", "normalized_question_overlap_counts",
+            "normalized_qa_pair_overlap_counts",
+        ):
+            _require_zero_overlap_audit(split_manifest, audit_field)
+        qa_root = Path(qa_condition_dir)
+        evaluation_manifest_path = _require_nonempty_file(
+            qa_root / "split_manifest.json", "Experiment-2 evaluation split manifest"
+        )
+        if hash_file(evaluation_manifest_path) != split_manifest.get("source_evaluation_split_manifest_sha256"):
+            raise ValueError("Experiment-2 SFT evaluation-manifest provenance mismatch")
+        for field in (
+            "source_database_sha256", "source_database_manifest_sha256",
+            "source_evaluation_split_manifest_sha256", "train_manifest_sha256",
+            "dev_manifest_sha256", "train_chain_indices_sha256",
+            "dev_chain_indices_sha256", "target_sft_chain_assignments_sha256",
+        ):
+            if not _is_sha256(split_manifest.get(field)):
+                raise ValueError(f"Experiment-2 target-SFT split manifest {field} is invalid")
+        train_records, train_provenance = _load_authenticated_target_sft_split(
+            dataset_path=dataset_path, split=training_split,
+            split_manifest=split_manifest, split_manifest_sha256=split_manifest_sha256,
+            expected_table_count=table_count, expected_fact_count=fact_count,
+        )
+        dev_records, dev_provenance = _load_authenticated_target_sft_split(
+            dataset_path=dataset_path, split=dev_split,
+            split_manifest=split_manifest, split_manifest_sha256=split_manifest_sha256,
+            expected_table_count=table_count, expected_fact_count=fact_count,
+        )
+        train_ids = {record["id"] for record in train_records}
+        dev_ids = {record["id"] for record in dev_records}
+        if train_ids & dev_ids:
+            raise ValueError("Experiment-2 target-SFT train/dev QA IDs overlap")
+        train_questions = {normalize_for_leakage(record["question"]) for record in train_records}
+        dev_questions = {normalize_for_leakage(record["question"]) for record in dev_records}
+        if train_questions & dev_questions:
+            raise ValueError("Experiment-2 target-SFT train/dev normalized questions overlap")
+        train_pairs = {
+            (normalize_for_leakage(record["question"]), normalize_for_leakage(record["gold_answer"]))
+            for record in train_records
+        }
+        dev_pairs = {
+            (normalize_for_leakage(record["question"]), normalize_for_leakage(record["gold_answer"]))
+            for record in dev_records
+        }
+        if train_pairs & dev_pairs:
+            raise ValueError("Experiment-2 target-SFT train/dev normalized QA pairs overlap")
+        source_dir_value = split_manifest.get("source_training_data_dir")
+        if not isinstance(source_dir_value, str) or not source_dir_value:
+            raise ValueError("Experiment-2 target-SFT source training-data path is missing")
+        source_dir = Path(source_dir_value).resolve()
+        database_path = _require_nonempty_file(source_dir / "database.sqlite", "Experiment-2 source database")
+        database_manifest_path = _require_nonempty_file(source_dir / "manifest.json", "Experiment-2 source database manifest")
+        if hash_file(database_path) != split_manifest["source_database_sha256"]:
+            raise ValueError("Experiment-2 target-SFT source database hash mismatch")
+        if hash_file(database_manifest_path) != split_manifest["source_database_manifest_sha256"]:
+            raise ValueError("Experiment-2 target-SFT source database manifest hash mismatch")
+        return train_records, dev_records, {
+            "dataset_path": str(dataset_path.resolve()),
+            "qa_condition_dir": str(Path(qa_condition_dir).resolve()),
+            "source_training_data_dir": str(source_dir),
+            "selected_tables": selected,
+            "target_sft_split_manifest_sha256": split_manifest_sha256,
+            "train_manifest_sha256": train_provenance["manifest_sha256"],
+            "dev_manifest_sha256": dev_provenance["manifest_sha256"],
+            "source_database_sha256": split_manifest["source_database_sha256"],
+            "source_database_manifest_sha256": split_manifest["source_database_manifest_sha256"],
+            "train": train_provenance,
+            "dev": dev_provenance,
+            "zero_context": True,
+            "validation_split_used": False,
+            "test_split_used": False,
+        }
     expected_root = {
         "format_version": 2,
         "experiment_name": "exp01_first_feasibility",
@@ -598,7 +739,7 @@ def build_target_sft_training_plan(
         "stage": "target-sft",
         "T": table_count,
         "N": fact_count,
-        "L": config["model"]["layers"] if layers is None else layers,
+        "L": configured_model_layers(config) if layers is None else layers,
         "dataset_dir": TARGET_SFT_DATASET_DIR,
         "training_split": TARGET_SFT_TRAIN_SPLIT,
         "dev_split": TARGET_SFT_DEV_SPLIT,
@@ -907,7 +1048,7 @@ def run_target_sft_training(
         or not (source_checkpoint / "config.json").is_file()
     ):
         raise FileNotFoundError(f"source checkpoint is missing: {source_checkpoint}")
-    requested_layers = config["model"]["layers"] if layers is None else layers
+    requested_layers = configured_model_layers(config) if layers is None else layers
     layer_provenance = verify_checkpoint_layers(source_checkpoint, requested_layers)
     ensure_target_sft_outputs_available(
         source_checkpoint=source_checkpoint,
@@ -916,12 +1057,13 @@ def run_target_sft_training(
         train_log_path=train_log_path,
     )
     settings = config.get("target_sft", {})
-    configured_reference_dir = qa_reference_dir(config)
-    if Path(qa_condition_dir).resolve() != configured_reference_dir.resolve():
-        raise ValueError(
-            "target SFT must use the configured immutable data.qa_reference directory"
-        )
-    reference_table_count, reference_fact_count = qa_reference_values(config)
+    is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
+    configured_reference_dir = None if is_exp2 else qa_reference_dir(config)
+    if not is_exp2 and Path(qa_condition_dir).resolve() != configured_reference_dir.resolve():
+        raise ValueError("target SFT must use the configured immutable data.qa_reference directory")
+    reference_table_count, reference_fact_count = (
+        (table_count, fact_count) if is_exp2 else qa_reference_values(config)
+    )
     train_records, dev_records, provenance = load_target_sft_dataset(
         qa_condition_dir,
         dataset_dir=settings.get("dataset_dir"),
@@ -930,9 +1072,41 @@ def run_target_sft_training(
         table_count=reference_table_count,
         fact_count=reference_fact_count,
     )
-    compatibility = verify_qa_reference_compatibility(
-        config, table_count, fact_count, reference_dir=qa_condition_dir
-    )
+    if is_exp2:
+        compatibility = {
+            "current_database_condition": {
+                "T": table_count, "N": fact_count,
+                "selected_tables": provenance.get("selected_tables"),
+                "source_database_sha256": provenance["source_database_sha256"],
+                "source_database_manifest_sha256": provenance["source_database_manifest_sha256"],
+            },
+            "qa_reference": {"path": str(Path(qa_condition_dir).resolve())},
+            "semantic_compatibility_fingerprint": hash_json_object({
+                "database": provenance["source_database_sha256"],
+                "manifest": provenance["source_database_manifest_sha256"],
+            }),
+        }
+        checkpoint_metadata_path = source_checkpoint / "training_metadata.json"
+        if not checkpoint_metadata_path.is_file():
+            raise FileNotFoundError(
+                "Experiment-2 target SFT requires a CPT checkpoint with training_metadata.json"
+            )
+        checkpoint_metadata = read_json(checkpoint_metadata_path)
+        if checkpoint_metadata.get("model") != config["model"]["name"]:
+            raise ValueError("source CPT checkpoint model identity is incompatible")
+        checkpoint_provenance = checkpoint_metadata.get("provenance", {})
+        for field in ("source_database_sha256", "database_manifest_sha256"):
+            expected = (
+                provenance["source_database_sha256"]
+                if field == "source_database_sha256"
+                else provenance["source_database_manifest_sha256"]
+            )
+            if checkpoint_provenance.get(field) != expected:
+                raise ValueError(f"source CPT checkpoint provenance mismatch for {field}")
+    else:
+        compatibility = verify_qa_reference_compatibility(
+            config, table_count, fact_count, reference_dir=qa_condition_dir
+        )
     plan = build_target_sft_training_plan(
         config,
         table_count=table_count,
@@ -1034,6 +1208,8 @@ def run_target_sft_training(
     run_record = {
         "stage": "target-sft",
         "experiment": config["experiment"]["name"],
+        "model": config["model"]["name"],
+        "run_timestamp": config.get("_runtime", {}).get("run_timestamp"),
         "T": table_count,
         "N": fact_count,
         "L": requested_layers,

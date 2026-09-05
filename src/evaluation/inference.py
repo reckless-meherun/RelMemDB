@@ -32,8 +32,10 @@ def extract_first_nonempty_line(raw_generation: str) -> str:
     return ""
 
 
-def _require_nonempty_file(path: Path, label: str) -> Path:
-    if not path.is_file() or path.stat().st_size == 0:
+def _require_nonempty_file(
+    path: Path, label: str, *, allow_empty: bool = False
+) -> Path:
+    if not path.is_file() or (path.stat().st_size == 0 and not allow_empty):
         raise FileNotFoundError(f"{label} is missing or empty: {path}")
     return path
 
@@ -114,7 +116,14 @@ def load_verified_qa_split(
     seen_ids: set[str] = set()
     records_by_hop: dict[str, list[dict[str, Any]]] = {}
     for hop, hop_name in enumerate(HOP_NAMES):
-        path = _require_nonempty_file(split_dir / f"{hop_name}.jsonl", hop_name)
+        path = _require_nonempty_file(
+            split_dir / f"{hop_name}.jsonl",
+            hop_name,
+            allow_empty=(
+                root_manifest.get("experiment_name") == "exp02_capacity_boundary"
+                and counts.get(hop_name, {}).get("final_retained_count") == 0
+            ),
+        )
         actual_hash = hash_file(path)
         if expected_hashes.get(path.name) != actual_hash:
             raise QAArtifactError(f"{hop_name} hash does not match the QA manifest")
