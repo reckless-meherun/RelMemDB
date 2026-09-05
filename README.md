@@ -47,8 +47,8 @@ python3 scripts/run_exp02.py \
   --model gpt2 \
   --layers 12 \
   --base-model models/base_models/gpt2 \
-  --cpt-epochs 400 \
-  --sft-epochs 200 \
+  --cpt-epochs 1000 \
+  --sft-epochs 1000 \
   --cpt-batch-size 4 \
   --cpt-gradient-accumulation 8
 ```
