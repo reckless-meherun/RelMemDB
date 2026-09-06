@@ -15,6 +15,7 @@ QA_FORMAT_VERSION = 2
 QUESTION_TEMPLATE_VERSION = "semantic_academic_closed_book_v1"
 SPLIT_METHOD_VERSION = "chain_order_3_reserved_1_validation_1_test_v1"
 TARGET_SFT_SPLIT_METHOD_VERSION = "reserved_order_9_train_1_dev_v1"
+EXP2_TARGET_SFT_SPLIT_METHOD_VERSION = "all_reserved_train_v1"
 ID_DIGEST_LENGTH = 32
 HOP_NAMES = ("H0", "H1", "H2", "H3")
 QA_RECORD_SPLITS = ("train", "dev", "validation", "test")
@@ -246,13 +247,7 @@ def assign_exp2_target_sft_splits(
         raise ValueError("Experiment-2 target SFT requires at least one reserved chain")
     if len(set(reserved_chain_indices)) != len(reserved_chain_indices):
         raise ValueError("reserved_chain_indices must be unique")
-    assignments = {"train": [], "dev": []}
-    for ordinal, chain_index in enumerate(reserved_chain_indices):
-        assignments["dev" if ordinal % 10 == 9 else "train"].append(chain_index)
-    # Tiny smoke datasets still need a distinct dev example when possible.
-    if not assignments["dev"] and len(assignments["train"]) > 1:
-        assignments["dev"].append(assignments["train"].pop())
-    return assignments
+    return {"train": list(reserved_chain_indices)}
 
 
 def _verify_database_manifest(
@@ -1087,7 +1082,7 @@ def _target_split_manifest(
             "source_evaluation_split_manifest_sha256"
         ],
         "sft_split_method": base_manifest["sft_split_method"],
-        "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+        "sft_split_method_version": base_manifest["sft_split_method_version"],
         "question_template_version": QUESTION_TEMPLATE_VERSION,
         "zero_context": True,
         "selected_tables": base_manifest.get("selected_tables"),
@@ -1156,7 +1151,7 @@ def generate_target_sft_qa(
     source_training_data_dir: str | Path | None = None,
     generation_timestamp: str | None = None,
 ) -> dict[str, Any]:
-    """Generate target-SFT train/dev QA only from recorded reserved chains."""
+    """Generate target-SFT QA only from recorded reserved chains."""
     database_path = Path(database_path)
     database_manifest_path = Path(database_manifest_path)
     qa_condition_dir = Path(qa_condition_dir)
@@ -1195,19 +1190,23 @@ def generate_target_sft_qa(
         if is_exp2
         else assign_reserved_target_sft_splits(evaluation_manifest["reserved_chain_indices"])
     )
-    if set(reserved_assignments["train"]) & set(reserved_assignments["dev"]):
-        raise RuntimeError("target-SFT train and dev chains overlap")
-    if set(reserved_assignments["train"]) | set(reserved_assignments["dev"]) != set(
-        evaluation_manifest["reserved_chain_indices"]
-    ):
+    target_sft_splits = ("train",) if is_exp2 else TARGET_SFT_SPLITS
+    assigned_chains = set().union(
+        *(set(reserved_assignments[split]) for split in target_sft_splits)
+    )
+    if assigned_chains != set(evaluation_manifest["reserved_chain_indices"]):
         raise RuntimeError("target-SFT assignments do not cover the reserved chains")
+    if not is_exp2 and set(reserved_assignments["train"]) & set(
+        reserved_assignments["dev"]
+    ):
+        raise RuntimeError("target-SFT train and dev chains overlap")
 
     raw_identifiers = {
         entity["entity_id"] for chain in chains for entity in chain["entities"]
     }
     all_records: dict[str, dict[str, list[dict[str, Any]]]] = {}
     split_audits: dict[str, dict[str, Any]] = {}
-    for split in TARGET_SFT_SPLITS:
+    for split in target_sft_splits:
         candidates = generate_qa_candidates(
             chains,
             reserved_assignments[split],
@@ -1231,8 +1230,7 @@ def generate_target_sft_qa(
         )
     partition_records = {**all_records, **evaluation_records}
     partition_chain_indices = {
-        "train": reserved_assignments["train"],
-        "dev": reserved_assignments["dev"],
+        **{split: reserved_assignments[split] for split in target_sft_splits},
         "validation": evaluation_manifest["validation_chain_indices"],
         "test": evaluation_manifest["test_chain_indices"],
     }
@@ -1250,8 +1248,17 @@ def generate_target_sft_qa(
         "source_dataset_manifest_sha256": hash_file(database_manifest_path),
         "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
         "sft_split_method": (
-            "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev "
-            "within each consecutive block of 10"
+            "all reserved chains assigned to target_sft/train"
+            if is_exp2
+            else (
+                "ordered reserved-chain ordinals 0-8 train and ordinal 9 dev "
+                "within each consecutive block of 10"
+            )
+        ),
+        "sft_split_method_version": (
+            EXP2_TARGET_SFT_SPLIT_METHOD_VERSION
+            if is_exp2
+            else TARGET_SFT_SPLIT_METHOD_VERSION
         ),
         "selected_tables": database_manifest.get("selected_tables"),
         "selected_positions": database_manifest.get("selected_positions"),
@@ -1271,7 +1278,7 @@ def generate_target_sft_qa(
             chain_indices=reserved_assignments[split],
             base_manifest=base_manifest,
         )
-        for split in TARGET_SFT_SPLITS
+        for split in target_sft_splits
     }
 
     immutable_hashes_after = _hash_artifacts(
@@ -1281,7 +1288,7 @@ def generate_target_sft_qa(
         raise RuntimeError("immutable validation/test QA artifacts changed during generation")
     assignment_hashes = {
         split: hash_json_object(reserved_assignments[split])
-        for split in TARGET_SFT_SPLITS
+        for split in target_sft_splits
     }
     split_manifest = {
         "format_version": QA_FORMAT_VERSION,
@@ -1300,16 +1307,13 @@ def generate_target_sft_qa(
         "source_evaluation_split_manifest_sha256": evaluation_manifest_sha256,
         "question_template_version": QUESTION_TEMPLATE_VERSION,
         "sft_split_method": base_manifest["sft_split_method"],
-        "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+        "sft_split_method_version": base_manifest["sft_split_method_version"],
         "original_reserved_chain_count": len(
             evaluation_manifest["reserved_chain_indices"]
         ),
         "train_chain_count": len(reserved_assignments["train"]),
-        "dev_chain_count": len(reserved_assignments["dev"]),
         "train_chain_indices": reserved_assignments["train"],
-        "dev_chain_indices": reserved_assignments["dev"],
         "train_chain_indices_sha256": assignment_hashes["train"],
-        "dev_chain_indices_sha256": assignment_hashes["dev"],
         "chain_assignment_hashes": assignment_hashes,
         "target_sft_chain_assignments_sha256": hash_json_object(
             reserved_assignments
@@ -1331,11 +1335,23 @@ def generate_target_sft_qa(
         "immutable_evaluation_artifact_hashes_after": immutable_hashes_after,
         "immutable_evaluation_artifacts_unchanged": True,
         "train_manifest_sha256": hash_file(output_dir / "train" / "manifest.json"),
-        "dev_manifest_sha256": hash_file(output_dir / "dev" / "manifest.json"),
     }
+    if not is_exp2:
+        split_manifest.update(
+            {
+                "dev_chain_count": len(reserved_assignments["dev"]),
+                "dev_chain_indices": reserved_assignments["dev"],
+                "dev_chain_indices_sha256": assignment_hashes["dev"],
+                "dev_manifest_sha256": hash_file(
+                    output_dir / "dev" / "manifest.json"
+                ),
+            }
+        )
     write_json(output_dir / "split_manifest.json", split_manifest)
-    return {
+    result = {
         "split_manifest": split_manifest,
         "train_manifest": split_manifests["train"],
-        "dev_manifest": split_manifests["dev"],
     }
+    if not is_exp2:
+        result["dev_manifest"] = split_manifests["dev"]
+    return result

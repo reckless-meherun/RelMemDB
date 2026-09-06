@@ -653,12 +653,18 @@ def _validate_exp02_config(config: dict[str, Any]) -> None:
 
     # Exp2 deliberately reuses the proven optimization/evaluation semantics.  Keep
     # this validation compact and focused on fields consumed by the shared code.
-    for key in ("fact_exposure", "cpt_batch_size", "cpt_epochs", "gradient_accumulation_steps", "context_length"):
+    for key in ("cpt_batch_size", "cpt_epochs", "gradient_accumulation_steps", "context_length"):
         _require_positive_int(_required(training, key, "training"), f"training.{key}")
+    if "fact_exposure" in training:
+        raise ConfigError("Experiment-2 training must not define fact_exposure")
     for key in ("dataloader_workers",):
         _require_non_negative_int(_required(training, key, "training"), f"training.{key}")
     for key in ("shuffle", "gradient_checkpointing", "fused_optimizer", "pin_memory", "drop_last"):
         _require_bool(_required(training, key, "training"), f"training.{key}")
+    if training["drop_last"]:
+        raise ConfigError(
+            "Experiment-2 training.drop_last must be false so every book token is trained"
+        )
     for key in ("learning_rate", "epsilon", "max_grad_norm"):
         if _require_number(_required(training, key, "training"), f"training.{key}") <= 0:
             raise ConfigError(f"training.{key} must be positive")
@@ -674,9 +680,12 @@ def _validate_exp02_config(config: dict[str, Any]) -> None:
         if not isinstance(_required(training, key, "training"), str):
             raise ConfigError(f"training.{key} must be text")
 
-    if target_sft.get("dataset_dir") != "target_sft" or target_sft.get("training_split") != "train" or target_sft.get("dev_split") != "dev":
-        raise ConfigError("Experiment-2 target_sft must use target_sft/train and target_sft/dev")
-    for key in ("batch_size", "gradient_accumulation_steps", "epochs", "context_length", "early_stopping_patience"):
+    if target_sft.get("dataset_dir") != "target_sft" or target_sft.get("training_split") != "train":
+        raise ConfigError("Experiment-2 target_sft must use target_sft/train")
+    for stale_key in ("dev_split", "early_stopping_patience"):
+        if stale_key in target_sft:
+            raise ConfigError(f"Experiment-2 target_sft must not define {stale_key}")
+    for key in ("batch_size", "gradient_accumulation_steps", "epochs", "context_length"):
         _require_positive_int(_required(target_sft, key, "target_sft"), f"target_sft.{key}")
     for key in ("dataloader_workers",):
         _require_non_negative_int(_required(target_sft, key, "target_sft"), f"target_sft.{key}")

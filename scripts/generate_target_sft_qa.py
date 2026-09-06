@@ -17,7 +17,7 @@ from utils.paths import database_condition_dir, exp2_qa_bundle_dir, qa_condition
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate deterministic target-SFT train/dev QA from the reserved "
+            "Generate deterministic target-SFT QA from the reserved "
             "chains of one existing closed-book QA condition."
         )
     )
@@ -77,9 +77,8 @@ def main() -> None:
             generation_timestamp=timestamp,
         )
         print(f"Target-SFT QA output: {condition_dir.relative_to(PROJECT_ROOT)}")
-        for split in ("train", "dev"):
-            counts = result[f"{split}_manifest"]["retained_counts"]
-            print(f"{split}: " + ", ".join(f"{hop}={counts[hop]}" for hop in HOP_NAMES))
+        counts = result["train_manifest"]["retained_counts"]
+        print("train: " + ", ".join(f"{hop}={counts[hop]}" for hop in HOP_NAMES))
         return
     if args.training_data_dir is not None:
         raise ValueError("--training-data-dir is reserved for Experiment 2")

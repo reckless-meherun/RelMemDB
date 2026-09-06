@@ -42,7 +42,7 @@ def verify_cpt_artifacts(
     database_path: str | Path,
     database_manifest_path: str | Path,
     readable_book_path: str | Path,
-    train_text_path: str | Path,
+    train_text_path: str | Path | None,
     cpt_manifest_path: str | Path,
 ) -> dict[str, Any]:
     database_path = _require_nonempty_file(database_path, "database")
@@ -50,15 +50,24 @@ def verify_cpt_artifacts(
         database_manifest_path, "database manifest"
     )
     readable_book_path = _require_nonempty_file(readable_book_path, "CPT readable book")
-    train_text_path = _require_nonempty_file(train_text_path, "CPT train text")
     cpt_manifest_path = _require_nonempty_file(cpt_manifest_path, "CPT manifest")
 
     database_manifest = read_json(database_manifest_path)
     cpt_manifest = read_json(cpt_manifest_path)
+    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    if is_exp2:
+        if train_text_path is not None and Path(train_text_path).exists():
+            raise CPTArtifactError("Experiment-2 must not contain CPT train.txt")
+        verified_train_text_path = None
+    else:
+        if train_text_path is None:
+            raise FileNotFoundError("CPT train text path is required")
+        verified_train_text_path = _require_nonempty_file(
+            train_text_path, "CPT train text"
+        )
     database_sha256 = hash_file(database_path)
     database_manifest_sha256 = hash_file(database_manifest_path)
     readable_book_sha256 = hash_file(readable_book_path)
-    train_text_sha256 = hash_file(train_text_path)
     cpt_manifest_sha256 = hash_file(cpt_manifest_path)
 
     if database_manifest.get("database_sha256") != database_sha256:
@@ -83,30 +92,15 @@ def verify_cpt_artifacts(
     if cpt_manifest.get("serialization_style") != SERIALIZATION_STYLE:
         raise CPTArtifactError("CPT serialization style is unsupported")
 
-    fact_exposure = config["training"]["fact_exposure"]
-    if cpt_manifest.get("fact_exposure") != fact_exposure:
-        raise CPTArtifactError("CPT fact exposure does not match the experiment config")
-    if cpt_manifest.get("readable_book_copy_count_in_train_text") != fact_exposure:
-        raise CPTArtifactError(
-            "CPT readable-book copy count does not match fact exposure"
-        )
     if cpt_manifest.get("source_database_sha256") != database_sha256:
         raise CPTArtifactError("CPT manifest source database hash is inconsistent")
     if cpt_manifest.get("source_database_manifest_sha256") != database_manifest_sha256:
         raise CPTArtifactError(
             "CPT manifest source database-manifest hash is inconsistent"
         )
-    if cpt_manifest.get("train_text_sha256") != train_text_sha256:
-        raise CPTArtifactError("CPT train-text hash does not match its manifest")
     if cpt_manifest.get("readable_book_sha256") != readable_book_sha256:
         raise CPTArtifactError("CPT readable-book hash does not match its manifest")
-    if cpt_manifest.get("logical_facts_per_exposure") != fact_count:
-        raise CPTArtifactError("CPT logical facts per exposure are inconsistent")
-    if cpt_manifest.get("serialized_logical_fact_occurrences") != (
-        fact_count * fact_exposure
-    ):
-        raise CPTArtifactError("CPT serialized logical-fact accounting is inconsistent")
-    if database_manifest.get("experiment_mode") == "selected_canonical_tables":
+    if is_exp2:
         if cpt_manifest.get("experiment_name") != database_manifest.get("experiment_name"):
             raise CPTArtifactError("CPT experiment identity does not match the database")
         if cpt_manifest.get("selected_tables") != database_manifest.get("selected_tables"):
@@ -115,51 +109,107 @@ def verify_cpt_artifacts(
             raise CPTArtifactError("CPT facts-per-selected-chain metadata is inconsistent")
         if cpt_manifest.get("logical_content_sha256") != database_manifest.get("logical_content_sha256"):
             raise CPTArtifactError("CPT logical-content provenance is inconsistent")
+        if cpt_manifest.get("cpt_source_text") != "book_readable.txt":
+            raise CPTArtifactError("Experiment-2 CPT source text must be book_readable.txt")
+        if cpt_manifest.get("book_copies_per_cpt_epoch") != 1:
+            raise CPTArtifactError("Experiment-2 CPT epoch must contain one book copy")
+        if cpt_manifest.get("logical_facts_in_book") != fact_count:
+            raise CPTArtifactError("Experiment-2 CPT book fact count is inconsistent")
+        stale_fields = {
+            "fact_exposure",
+            "readable_book_copy_count_in_train_text",
+            "serialized_logical_fact_occurrences",
+            "train_text_sha256",
+            "train_text_byte_count",
+            "train_text_character_count",
+            "train_text_line_count",
+        }
+        present = sorted(stale_fields & cpt_manifest.keys())
+        present.extend(
+            sorted(key for key in cpt_manifest if key.endswith("_per_exposure"))
+        )
+        if present:
+            raise CPTArtifactError(
+                f"Experiment-2 CPT manifest contains stale fields: {present}"
+            )
 
     readable_book_bytes = readable_book_path.read_bytes()
-    train_bytes = train_text_path.read_bytes()
     try:
         readable_book = readable_book_bytes.decode("utf-8")
-        train_text = train_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise CPTArtifactError(
-            "CPT readable book or train text is not valid UTF-8"
-        ) from exc
+        raise CPTArtifactError("CPT readable book is not valid UTF-8") from exc
     expected_statistics = {
         "readable_book_byte_count": len(readable_book_bytes),
         "readable_book_character_count": len(readable_book),
         "readable_book_line_count": readable_book.count("\n"),
-        "train_text_byte_count": len(train_bytes),
-        "train_text_character_count": len(train_text),
-        "train_text_line_count": train_text.count("\n"),
     }
     for key, actual_value in expected_statistics.items():
         if cpt_manifest.get(key) != actual_value:
             raise CPTArtifactError(f"CPT manifest {key} is inconsistent")
 
-    if train_bytes != readable_book_bytes * fact_exposure:
-        raise CPTArtifactError(
-            "CPT train text is not exactly fact_exposure copies of the readable book"
-        )
-
-    return {
+    provenance = {
         "T": table_count,
         "N": fact_count,
         "source_database_sha256": database_sha256,
         "database_manifest_sha256": database_manifest_sha256,
         "readable_book_sha256": readable_book_sha256,
-        "cpt_train_text_sha256": train_text_sha256,
         "cpt_manifest_sha256": cpt_manifest_sha256,
-        "fact_exposure": fact_exposure,
-        "readable_book_copy_count_in_train_text": fact_exposure,
         "serialization_style": SERIALIZATION_STYLE,
         "readable_book_byte_count": len(readable_book_bytes),
-        "train_text_byte_count": len(train_bytes),
         "experiment_name": database_manifest.get("experiment_name"),
         "selected_tables": database_manifest.get("selected_tables"),
         "training_data_dir": str(database_manifest_path.parent.resolve()),
         "logical_content_sha256": database_manifest.get("logical_content_sha256"),
     }
+    if is_exp2:
+        provenance.update(
+            {
+                "cpt_source_text": "book_readable.txt",
+                "cpt_source_path": str(readable_book_path.resolve()),
+                "book_copies_per_cpt_epoch": 1,
+                "logical_facts_per_cpt_epoch": fact_count,
+            }
+        )
+        return provenance
+
+    assert verified_train_text_path is not None
+    if cpt_manifest.get("logical_facts_per_exposure") != fact_count:
+        raise CPTArtifactError("CPT logical facts per exposure are inconsistent")
+    fact_exposure = config["training"]["fact_exposure"]
+    if cpt_manifest.get("fact_exposure") != fact_exposure:
+        raise CPTArtifactError("CPT fact exposure does not match the experiment config")
+    if cpt_manifest.get("readable_book_copy_count_in_train_text") != fact_exposure:
+        raise CPTArtifactError("CPT readable-book copy count does not match fact exposure")
+    train_bytes = verified_train_text_path.read_bytes()
+    try:
+        train_text = train_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CPTArtifactError("CPT train text is not valid UTF-8") from exc
+    train_text_sha256 = hash_file(verified_train_text_path)
+    if cpt_manifest.get("train_text_sha256") != train_text_sha256:
+        raise CPTArtifactError("CPT train-text hash does not match its manifest")
+    if cpt_manifest.get("serialized_logical_fact_occurrences") != fact_count * fact_exposure:
+        raise CPTArtifactError("CPT serialized logical-fact accounting is inconsistent")
+    for key, actual_value in {
+        "train_text_byte_count": len(train_bytes),
+        "train_text_character_count": len(train_text),
+        "train_text_line_count": train_text.count("\n"),
+    }.items():
+        if cpt_manifest.get(key) != actual_value:
+            raise CPTArtifactError(f"CPT manifest {key} is inconsistent")
+    if train_bytes != readable_book_bytes * fact_exposure:
+        raise CPTArtifactError(
+            "CPT train text is not exactly fact_exposure copies of the readable book"
+        )
+    provenance.update(
+        {
+            "cpt_train_text_sha256": train_text_sha256,
+            "fact_exposure": fact_exposure,
+            "readable_book_copy_count_in_train_text": fact_exposure,
+            "train_text_byte_count": len(train_bytes),
+        }
+    )
+    return provenance
 
 
 def chunk_token_ids(
@@ -302,7 +352,8 @@ def build_cpt_training_plan(
             raise ValueError(f"training.{key} must be {qualifier}")
         return numeric_value
 
-    fact_exposure = positive_int("fact_exposure")
+    is_exp2 = config.get("experiment", {}).get("name") == "exp02_capacity_boundary"
+    fact_exposure = None if is_exp2 else positive_int("fact_exposure")
     batch_size = positive_int("cpt_batch_size")
     epochs = positive_int("cpt_epochs")
     gradient_accumulation_steps = positive_int("gradient_accumulation_steps")
@@ -355,6 +406,11 @@ def build_cpt_training_plan(
     seed = config.get("experiment", {}).get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise ValueError("experiment.seed must be a non-negative integer")
+    if is_exp2 and drop_last:
+        raise ValueError(
+            "Experiment-2 training.drop_last must be false so each CPT epoch "
+            "is one complete pass over book_readable.txt"
+        )
 
     if drop_last:
         micro_batches_per_epoch = sequence_count // batch_size
@@ -370,7 +426,7 @@ def build_cpt_training_plan(
     steps_per_epoch = math.ceil(micro_batches_per_epoch / gradient_accumulation_steps)
     optimizer_steps = steps_per_epoch * epochs
     warmup_steps = math.ceil(optimizer_steps * warmup_ratio)
-    return {
+    plan = {
         "stage": "cpt",
         "T": table_count,
         "N": fact_count,
@@ -378,8 +434,6 @@ def build_cpt_training_plan(
         "seed": seed,
         "epochs": epochs,
         "passes_over_serialized_corpus": epochs,
-        "fact_exposure": fact_exposure,
-        "effective_fact_exposure": fact_exposure * epochs,
         "context_length": context_length,
         "batch_size": batch_size,
         "gradient_accumulation_steps": gradient_accumulation_steps,
@@ -411,6 +465,24 @@ def build_cpt_training_plan(
         "total_optimizer_steps": optimizer_steps,
         "optimizer_steps": optimizer_steps,
     }
+    if is_exp2:
+        plan.update(
+            {
+                "cpt_source_text": "book_readable.txt",
+                "book_passes_per_epoch": 1,
+                "requested_cpt_epochs": epochs,
+                "requested_book_passes": epochs,
+            }
+        )
+    else:
+        assert fact_exposure is not None
+        plan.update(
+            {
+                "fact_exposure": fact_exposure,
+                "effective_fact_exposure": fact_exposure * epochs,
+            }
+        )
+    return plan
 
 
 def _iterate_cpt_batches(loader: Any, epochs: int) -> Iterator[tuple[int, int, Any]]:
@@ -503,7 +575,7 @@ def run_cpt_training(
     database_path: str | Path,
     database_manifest_path: str | Path,
     readable_book_path: str | Path,
-    train_text_path: str | Path,
+    train_text_path: str | Path | None,
     cpt_manifest_path: str | Path,
 ) -> dict[str, Any]:
     source_checkpoint = Path(source_checkpoint)
@@ -538,8 +610,10 @@ def run_cpt_training(
     )
     started = time.perf_counter()
     model, tokenizer = _load_model_and_tokenizer(source_checkpoint)
+    is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
+    corpus_path = Path(readable_book_path) if is_exp2 else Path(train_text_path)
     examples, token_statistics = tokenize_cpt_corpus(
-        read_text(train_text_path),
+        read_text(corpus_path),
         tokenizer,
         context_length=config["training"]["context_length"],
     )
@@ -547,7 +621,12 @@ def run_cpt_training(
         tokenizer.encode(read_text(readable_book_path), add_special_tokens=False)
     )
     token_statistics["book_token_count"] = book_token_count
-    token_statistics["train_token_count"] = token_statistics["total_tokens"]
+    if is_exp2:
+        token_statistics["cpt_source_path"] = str(corpus_path.resolve())
+        token_statistics["cpt_source_text"] = corpus_path.name
+        token_statistics["cpt_source_token_count"] = token_statistics["total_tokens"]
+    else:
+        token_statistics["train_token_count"] = token_statistics["total_tokens"]
     plan = build_cpt_training_plan(
         config,
         table_count=table_count,
@@ -655,13 +734,22 @@ def run_cpt_training(
         "epochs": plan["epochs"],
         "steps_per_epoch": plan["steps_per_epoch"],
         "optimizer_steps": plan["optimizer_steps"],
-        "effective_fact_exposure": plan["effective_fact_exposure"],
         "provenance": provenance,
         "tokenization": token_statistics,
         "training": plan,
     }
-    if config["experiment"]["name"] == "exp02_capacity_boundary":
+    if is_exp2:
         run_record["stage"] = "cpt"
+        run_record.update(
+            {
+                "requested_cpt_epochs": plan["epochs"],
+                "cpt_source_text": "book_readable.txt",
+                "book_passes_per_epoch": 1,
+                "requested_book_passes": plan["epochs"],
+            }
+        )
+    else:
+        run_record["effective_fact_exposure"] = plan["effective_fact_exposure"]
     write_yaml(run_config_path, run_record)
 
     step_records: list[dict[str, Any]] = []
@@ -782,6 +870,14 @@ def run_cpt_training(
         "runtime_seconds": runtime_seconds,
         "peak_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
     }
+    if is_exp2:
+        summary.update(
+            {
+                "completed_cpt_epochs": plan["epochs"],
+                "completed_book_passes": plan["epochs"],
+                "final_checkpoint_epoch": plan["epochs"],
+            }
+        )
     write_json(output_checkpoint / "training_metadata.json", summary)
     write_jsonl(
         train_log_path,

@@ -231,7 +231,7 @@ def _run_exp2(args: argparse.Namespace, config: dict) -> None:
             database_path=condition["database"],
             database_manifest_path=condition["manifest_path"],
             readable_book_path=cpt_dir / "book_readable.txt",
-            train_text_path=cpt_dir / "train.txt",
+            train_text_path=None,
             cpt_manifest_path=condition["cpt_manifest"],
         )
         print(

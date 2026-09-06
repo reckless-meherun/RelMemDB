@@ -28,6 +28,7 @@ TARGET_SFT_DATASET_DIR = "target_sft"
 TARGET_SFT_TRAIN_SPLIT = "train"
 TARGET_SFT_DEV_SPLIT = "dev"
 TARGET_SFT_SPLIT_METHOD_VERSION = "reserved_order_9_train_1_dev_v1"
+EXP2_TARGET_SFT_SPLIT_METHOD_VERSION = "all_reserved_train_v1"
 CANONICAL_TARGET_SFT_COUNTS = {
     "train": {
         "chain_count": 135,
@@ -65,9 +66,14 @@ def _is_sha256(value: Any) -> bool:
     )
 
 
-def _require_zero_overlap_audit(split_manifest: dict[str, Any], field: str) -> None:
+def _require_zero_overlap_audit(
+    split_manifest: dict[str, Any],
+    field: str,
+    *,
+    required_pairs: set[str] = REQUIRED_CROSS_PARTITION_PAIRS,
+) -> None:
     audit = split_manifest.get(field)
-    if not isinstance(audit, dict) or not REQUIRED_CROSS_PARTITION_PAIRS <= set(audit):
+    if not isinstance(audit, dict) or not required_pairs <= set(audit):
         raise ValueError(f"target-SFT {field} is missing required partition pairs")
     invalid = {
         pair: count
@@ -150,7 +156,9 @@ def _load_authenticated_target_sft_split(
         "source_evaluation_split_manifest_sha256": split_manifest.get(
             "source_evaluation_split_manifest_sha256"
         ),
-        "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+        "sft_split_method_version": split_manifest.get(
+            "sft_split_method_version"
+        ),
         "question_template_version": split_manifest.get("question_template_version"),
         "zero_context": True,
         "selected_tables": split_manifest.get("selected_tables"),
@@ -235,17 +243,16 @@ def load_target_sft_dataset(
     *,
     dataset_dir: str,
     training_split: str,
-    dev_split: str,
+    dev_split: str | None,
     table_count: int,
     fact_count: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    """Authenticate and load only dedicated target-SFT train and dev records."""
+    """Authenticate and load only dedicated target-SFT training records."""
     if dataset_dir != TARGET_SFT_DATASET_DIR:
         raise ValueError("target SFT dataset_dir must be target_sft")
-    if training_split != TARGET_SFT_TRAIN_SPLIT or dev_split != TARGET_SFT_DEV_SPLIT:
+    if training_split != TARGET_SFT_TRAIN_SPLIT:
         raise ValueError(
-            "target SFT may load only target_sft/train and target_sft/dev; "
-            "validation and test are forbidden"
+            "target SFT may load only target_sft/train; validation and test are forbidden"
         )
     dataset_path = Path(qa_condition_dir) / dataset_dir
     split_manifest_path = _require_nonempty_file(
@@ -254,6 +261,8 @@ def load_target_sft_dataset(
     split_manifest_sha256 = hash_file(split_manifest_path)
     split_manifest = read_json(split_manifest_path)
     if split_manifest.get("experiment_name") == "exp02_capacity_boundary":
+        if dev_split is not None:
+            raise ValueError("Experiment-2 target SFT must not configure a dev split")
         expected_root = {
             "format_version": 2,
             "T": table_count,
@@ -261,7 +270,7 @@ def load_target_sft_dataset(
             "requested_N": fact_count,
             "source_evaluation_split_manifest": "../split_manifest.json",
             "question_template_version": "semantic_academic_closed_book_v1",
-            "sft_split_method_version": TARGET_SFT_SPLIT_METHOD_VERSION,
+            "sft_split_method_version": EXP2_TARGET_SFT_SPLIT_METHOD_VERSION,
             "zero_context": True,
             "target_qa_training_generated": True,
             "deterministic_generation": True,
@@ -278,10 +287,18 @@ def load_target_sft_dataset(
             "source_database_manifest_sha256"
         ):
             raise ValueError("Experiment-2 source dataset-manifest provenance is inconsistent")
-        assignments = {
-            split: split_manifest.get(f"{split}_chain_indices")
-            for split in ("train", "dev")
+        stale_fields = {
+            "dev_chain_count",
+            "dev_chain_indices",
+            "dev_chain_indices_sha256",
+            "dev_manifest_sha256",
         }
+        present = sorted(stale_fields & split_manifest.keys())
+        if present:
+            raise ValueError(
+                f"Experiment-2 target-SFT manifest contains stale dev fields: {present}"
+            )
+        assignments = {"train": split_manifest.get("train_chain_indices")}
         for split, indices in assignments.items():
             if not isinstance(indices, list) or len(indices) != split_manifest.get(f"{split}_chain_count"):
                 raise ValueError(f"Experiment-2 target-SFT {split} chain assignment is invalid")
@@ -295,7 +312,6 @@ def load_target_sft_dataset(
             raise ValueError("Experiment-2 target-SFT combined chain assignment hash is invalid")
         partition_sets = {
             "train": set(assignments["train"]),
-            "dev": set(assignments["dev"]),
             "validation": set(split_manifest.get("validation_chain_indices", [])),
             "test": set(split_manifest.get("test_chain_indices", [])),
         }
@@ -310,18 +326,30 @@ def load_target_sft_dataset(
             "exact_question_overlap_counts", "normalized_question_overlap_counts",
             "normalized_qa_pair_overlap_counts",
         ):
-            _require_zero_overlap_audit(split_manifest, audit_field)
+            _require_zero_overlap_audit(
+                split_manifest,
+                audit_field,
+                required_pairs={
+                    "train__validation",
+                    "train__test",
+                    "validation__test",
+                },
+            )
         qa_root = Path(qa_condition_dir)
         evaluation_manifest_path = _require_nonempty_file(
             qa_root / "split_manifest.json", "Experiment-2 evaluation split manifest"
         )
         if hash_file(evaluation_manifest_path) != split_manifest.get("source_evaluation_split_manifest_sha256"):
             raise ValueError("Experiment-2 SFT evaluation-manifest provenance mismatch")
+        evaluation_manifest = read_json(evaluation_manifest_path)
+        if assignments["train"] != evaluation_manifest.get("reserved_chain_indices"):
+            raise ValueError(
+                "Experiment-2 target-SFT train chains must equal all reserved chains"
+            )
         for field in (
             "source_database_sha256", "source_database_manifest_sha256",
             "source_evaluation_split_manifest_sha256", "train_manifest_sha256",
-            "dev_manifest_sha256", "train_chain_indices_sha256",
-            "dev_chain_indices_sha256", "target_sft_chain_assignments_sha256",
+            "train_chain_indices_sha256", "target_sft_chain_assignments_sha256",
         ):
             if not _is_sha256(split_manifest.get(field)):
                 raise ValueError(f"Experiment-2 target-SFT split manifest {field} is invalid")
@@ -330,29 +358,6 @@ def load_target_sft_dataset(
             split_manifest=split_manifest, split_manifest_sha256=split_manifest_sha256,
             expected_table_count=table_count, expected_fact_count=fact_count,
         )
-        dev_records, dev_provenance = _load_authenticated_target_sft_split(
-            dataset_path=dataset_path, split=dev_split,
-            split_manifest=split_manifest, split_manifest_sha256=split_manifest_sha256,
-            expected_table_count=table_count, expected_fact_count=fact_count,
-        )
-        train_ids = {record["id"] for record in train_records}
-        dev_ids = {record["id"] for record in dev_records}
-        if train_ids & dev_ids:
-            raise ValueError("Experiment-2 target-SFT train/dev QA IDs overlap")
-        train_questions = {normalize_for_leakage(record["question"]) for record in train_records}
-        dev_questions = {normalize_for_leakage(record["question"]) for record in dev_records}
-        if train_questions & dev_questions:
-            raise ValueError("Experiment-2 target-SFT train/dev normalized questions overlap")
-        train_pairs = {
-            (normalize_for_leakage(record["question"]), normalize_for_leakage(record["gold_answer"]))
-            for record in train_records
-        }
-        dev_pairs = {
-            (normalize_for_leakage(record["question"]), normalize_for_leakage(record["gold_answer"]))
-            for record in dev_records
-        }
-        if train_pairs & dev_pairs:
-            raise ValueError("Experiment-2 target-SFT train/dev normalized QA pairs overlap")
         source_dir_value = split_manifest.get("source_training_data_dir")
         if not isinstance(source_dir_value, str) or not source_dir_value:
             raise ValueError("Experiment-2 target-SFT source training-data path is missing")
@@ -363,22 +368,26 @@ def load_target_sft_dataset(
             raise ValueError("Experiment-2 target-SFT source database hash mismatch")
         if hash_file(database_manifest_path) != split_manifest["source_database_manifest_sha256"]:
             raise ValueError("Experiment-2 target-SFT source database manifest hash mismatch")
-        return train_records, dev_records, {
+        return train_records, [], {
             "dataset_path": str(dataset_path.resolve()),
             "qa_condition_dir": str(Path(qa_condition_dir).resolve()),
             "source_training_data_dir": str(source_dir),
             "selected_tables": selected,
             "target_sft_split_manifest_sha256": split_manifest_sha256,
             "train_manifest_sha256": train_provenance["manifest_sha256"],
-            "dev_manifest_sha256": dev_provenance["manifest_sha256"],
             "source_database_sha256": split_manifest["source_database_sha256"],
             "source_database_manifest_sha256": split_manifest["source_database_manifest_sha256"],
             "train": train_provenance,
-            "dev": dev_provenance,
             "zero_context": True,
+            "dev_split_used": False,
             "validation_split_used": False,
             "test_split_used": False,
         }
+    if dev_split != TARGET_SFT_DEV_SPLIT:
+        raise ValueError(
+            "target SFT may load only target_sft/train and target_sft/dev; "
+            "validation and test are forbidden"
+        )
     expected_root = {
         "format_version": 2,
         "experiment_name": "exp01_first_feasibility",
@@ -679,14 +688,23 @@ def build_target_sft_training_plan(
         raise ValueError("target_sft.dataset_dir must be target_sft")
     if settings.get("training_split") != TARGET_SFT_TRAIN_SPLIT:
         raise ValueError("target_sft.training_split must be train")
-    if settings.get("dev_split") != TARGET_SFT_DEV_SPLIT:
+    is_exp2 = config.get("experiment", {}).get("name") == "exp02_capacity_boundary"
+    if is_exp2:
+        for stale_key in ("dev_split", "early_stopping_patience"):
+            if stale_key in settings:
+                raise ValueError(
+                    f"Experiment-2 target_sft must not define {stale_key}"
+                )
+    elif settings.get("dev_split") != TARGET_SFT_DEV_SPLIT:
         raise ValueError("target_sft.dev_split must be dev")
     batch_size = positive_int("batch_size")
     accumulation_steps = positive_int("gradient_accumulation_steps")
     epochs = positive_int("epochs")
-    early_stopping_patience = positive_int("early_stopping_patience")
-    if early_stopping_patience != 3:
-        raise ValueError("target_sft.early_stopping_patience must be 3")
+    early_stopping_patience = None
+    if not is_exp2:
+        early_stopping_patience = positive_int("early_stopping_patience")
+        if early_stopping_patience != 3:
+            raise ValueError("target_sft.early_stopping_patience must be 3")
     context_length = positive_int("context_length")
     dataloader_workers = non_negative_int("dataloader_workers")
     learning_rate = number("learning_rate")
@@ -735,15 +753,13 @@ def build_target_sft_training_plan(
     optimizer_steps_per_epoch = math.ceil(microbatches_per_epoch / accumulation_steps)
     total_optimizer_steps = optimizer_steps_per_epoch * epochs
     warmup_steps = math.ceil(total_optimizer_steps * warmup_ratio)
-    return {
+    plan = {
         "stage": "target-sft",
         "T": table_count,
         "N": fact_count,
         "L": configured_model_layers(config) if layers is None else layers,
         "dataset_dir": TARGET_SFT_DATASET_DIR,
         "training_split": TARGET_SFT_TRAIN_SPLIT,
-        "dev_split": TARGET_SFT_DEV_SPLIT,
-        "early_stopping_patience": early_stopping_patience,
         "example_count": example_count,
         "batch_size": batch_size,
         "gradient_accumulation_steps": accumulation_steps,
@@ -779,6 +795,23 @@ def build_target_sft_training_plan(
         "validation_split_used": False,
         "test_split_used": False,
     }
+    if is_exp2:
+        plan.update(
+            {
+                "requested_sft_epochs": epochs,
+                "early_stopping_enabled": False,
+                "checkpoint_selection": "final_requested_epoch",
+                "dev_split_used": False,
+            }
+        )
+    else:
+        plan.update(
+            {
+                "dev_split": TARGET_SFT_DEV_SPLIT,
+                "early_stopping_patience": early_stopping_patience,
+            }
+        )
+    return plan
 
 
 def seeded_dataloader_generator(torch_module: Any, seed: int) -> Any:
@@ -1026,7 +1059,7 @@ def evaluate_target_sft_dev(
     )
 
 
-def _save_best_target_sft_checkpoint(
+def _save_target_sft_checkpoint(
     *,
     model: Any,
     tokenizer: Any,
@@ -1140,12 +1173,16 @@ def run_target_sft_training(
         )
         for record in train_records
     ]
-    dev_examples = [
-        encode_target_sft_example(
-            record, tokenizer, context_length=plan["context_length"]
-        )
-        for record in dev_records
-    ]
+    dev_examples = (
+        []
+        if is_exp2
+        else [
+            encode_target_sft_example(
+                record, tokenizer, context_length=plan["context_length"]
+            )
+            for record in dev_records
+        ]
+    )
     model_context_limit = getattr(model.config, "max_position_embeddings", None)
     if model_context_limit is None:
         model_context_limit = getattr(model.config, "n_positions", None)
@@ -1198,18 +1235,20 @@ def run_target_sft_training(
         persistent_workers=plan["dataloader_workers"] > 0,
         generator=generator,
     )
-    dev_loader = DataLoader(
-        dev_examples,
-        batch_size=plan["batch_size"],
-        shuffle=False,
-        collate_fn=partial(
-            collate_target_sft_examples, pad_token_id=tokenizer.pad_token_id
-        ),
-        pin_memory=plan["pin_memory"],
-        drop_last=False,
-        num_workers=plan["dataloader_workers"],
-        persistent_workers=plan["dataloader_workers"] > 0,
-    )
+    dev_loader = None
+    if not is_exp2:
+        dev_loader = DataLoader(
+            dev_examples,
+            batch_size=plan["batch_size"],
+            shuffle=False,
+            collate_fn=partial(
+                collate_target_sft_examples, pad_token_id=tokenizer.pad_token_id
+            ),
+            pin_memory=plan["pin_memory"],
+            drop_last=False,
+            num_workers=plan["dataloader_workers"],
+            persistent_workers=plan["dataloader_workers"] > 0,
+        )
     if len(train_loader) != plan["microbatches_per_epoch"]:
         raise RuntimeError("target-SFT DataLoader batch accounting is inconsistent")
     optimizer, fused_used, fused_fallback = build_target_sft_optimizer(
@@ -1245,32 +1284,21 @@ def run_target_sft_training(
         "checkpoint_layer_verification": layer_provenance,
         "sft_dataset_path": provenance["dataset_path"],
         "qa_training_split": TARGET_SFT_TRAIN_SPLIT,
-        "qa_dev_split": TARGET_SFT_DEV_SPLIT,
         "train_example_count": len(train_records),
-        "dev_example_count": len(dev_records),
         "total_examples": len(train_records),
         "train_hop_counts": provenance["train"]["hop_counts"],
-        "dev_hop_counts": provenance["dev"]["hop_counts"],
         "train_chain_count": provenance["train"]["chain_count"],
-        "dev_chain_count": provenance["dev"]["chain_count"],
         "target_sft_split_manifest_sha256": provenance[
             "target_sft_split_manifest_sha256"
         ],
         "train_manifest_sha256": provenance["train_manifest_sha256"],
-        "dev_manifest_sha256": provenance["dev_manifest_sha256"],
         "train_input_file_sha256": provenance["train"]["input_file_sha256"],
-        "dev_input_file_sha256": provenance["dev"]["input_file_sha256"],
         "prompt_format": PROMPT_TEMPLATE,
         "answer_only_loss": True,
         "eos_supervised": True,
         "full_parameter_training": True,
         "validation_split_used": False,
         "test_split_used": False,
-        "checkpoint_selection": (
-            "highest target_sft/dev overall normalized exact match; then lower "
-            "dev answer-only loss; then earlier epoch"
-        ),
-        "early_stopping_patience": plan["early_stopping_patience"],
         "context_length": plan["context_length"],
         "batch_size": plan["batch_size"],
         "gradient_accumulation_steps": plan["gradient_accumulation_steps"],
@@ -1300,6 +1328,31 @@ def run_target_sft_training(
         "provenance": provenance,
         "training": plan,
     }
+    if is_exp2:
+        run_record.update(
+            {
+                "requested_sft_epochs": plan["epochs"],
+                "dev_split_used": False,
+                "early_stopping_enabled": False,
+                "checkpoint_selection": "final_requested_epoch",
+            }
+        )
+    else:
+        run_record.update(
+            {
+                "qa_dev_split": TARGET_SFT_DEV_SPLIT,
+                "dev_example_count": len(dev_records),
+                "dev_hop_counts": provenance["dev"]["hop_counts"],
+                "dev_chain_count": provenance["dev"]["chain_count"],
+                "dev_manifest_sha256": provenance["dev_manifest_sha256"],
+                "dev_input_file_sha256": provenance["dev"]["input_file_sha256"],
+                "checkpoint_selection": (
+                    "highest target_sft/dev overall normalized exact match; then lower "
+                    "dev answer-only loss; then earlier epoch"
+                ),
+                "early_stopping_patience": plan["early_stopping_patience"],
+            }
+        )
     write_yaml(run_config_path, run_record)
 
     log_records: list[dict[str, Any]] = [{"record_type": "configuration", **run_record}]
@@ -1388,41 +1441,44 @@ def run_target_sft_training(
             "train_optimizer_steps": epoch_optimizer_steps,
             "train_supervised_shifted_tokens": epoch_loss_tokens,
         }
-        epoch_record.update(
-            evaluate_target_sft_dev(
-                model=model,
-                tokenizer=tokenizer,
-                dev_records=dev_records,
-                dev_loader=dev_loader,
-                torch_module=torch,
-                device=device,
-                generation_batch_size=config["evaluation"]["batch_size"],
-                generation_context_length=config["evaluation"]["context_length"],
-                max_new_tokens=config["evaluation"]["max_new_tokens"],
+        should_stop = False
+        if not is_exp2:
+            assert dev_loader is not None
+            epoch_record.update(
+                evaluate_target_sft_dev(
+                    model=model,
+                    tokenizer=tokenizer,
+                    dev_records=dev_records,
+                    dev_loader=dev_loader,
+                    torch_module=torch,
+                    device=device,
+                    generation_batch_size=config["evaluation"]["batch_size"],
+                    generation_context_length=config["evaluation"]["context_length"],
+                    max_new_tokens=config["evaluation"]["max_new_tokens"],
+                )
             )
-        )
-        (
-            best_epoch_record,
-            completed_epochs_without_improvement,
-            improved,
-            should_stop,
-        ) = update_target_sft_selection(
-            epoch_record,
-            incumbent=best_epoch_record,
-            completed_epochs_without_improvement=(completed_epochs_without_improvement),
-            patience=plan["early_stopping_patience"],
-        )
-        epoch_record["improved_best_checkpoint"] = improved
-        epoch_record["completed_epochs_without_improvement"] = (
-            completed_epochs_without_improvement
-        )
-        if improved:
-            _save_best_target_sft_checkpoint(
-                model=model,
-                tokenizer=tokenizer,
-                output_checkpoint=output_checkpoint,
-                previous_use_cache=previous_use_cache,
+            (
+                best_epoch_record,
+                completed_epochs_without_improvement,
+                improved,
+                should_stop,
+            ) = update_target_sft_selection(
+                epoch_record,
+                incumbent=best_epoch_record,
+                completed_epochs_without_improvement=(completed_epochs_without_improvement),
+                patience=plan["early_stopping_patience"],
             )
+            epoch_record["improved_best_checkpoint"] = improved
+            epoch_record["completed_epochs_without_improvement"] = (
+                completed_epochs_without_improvement
+            )
+            if improved:
+                _save_target_sft_checkpoint(
+                    model=model,
+                    tokenizer=tokenizer,
+                    output_checkpoint=output_checkpoint,
+                    previous_use_cache=previous_use_cache,
+                )
         epoch_records.append(epoch_record)
         log_records.append(epoch_record)
         if should_stop:
@@ -1440,12 +1496,24 @@ def run_target_sft_training(
         raise RuntimeError(
             "target SFT did not use every example exactly once per epoch"
         )
-    if best_epoch_record is None:
-        raise RuntimeError("target-SFT model selection did not select a checkpoint")
-    for epoch_record in epoch_records:
-        epoch_record["selected_as_best"] = (
-            epoch_record["epoch"] == best_epoch_record["epoch"]
+    if is_exp2:
+        if completed_epochs != plan["epochs"]:
+            raise RuntimeError(
+                "Experiment-2 target SFT did not complete every requested epoch"
+            )
+        _save_target_sft_checkpoint(
+            model=model,
+            tokenizer=tokenizer,
+            output_checkpoint=output_checkpoint,
+            previous_use_cache=previous_use_cache,
         )
+    else:
+        if best_epoch_record is None:
+            raise RuntimeError("target-SFT model selection did not select a checkpoint")
+        for epoch_record in epoch_records:
+            epoch_record["selected_as_best"] = (
+                epoch_record["epoch"] == best_epoch_record["epoch"]
+            )
 
     configure_gradient_checkpointing(model, False)
     model.config.use_cache = previous_use_cache
@@ -1461,27 +1529,48 @@ def run_target_sft_training(
             {"epoch": record["epoch"], "train_loss": record["train_loss"]}
             for record in epoch_records
         ],
-        "per_epoch_dev_loss": [
-            {
-                "epoch": record["epoch"],
-                "dev_answer_only_loss": record["dev_answer_only_loss"],
-            }
-            for record in epoch_records
-        ],
         "training_loss": total_weighted_loss / total_loss_tokens,
         "observed_examples": observed_examples,
-        "selected_epoch": best_epoch_record["epoch"],
-        "early_stopped": early_stopped,
-        "best_dev_normalized_exact_match": best_epoch_record[
-            "dev_overall_normalized_exact_match"
-        ],
-        "best_dev_answer_only_loss": best_epoch_record["dev_answer_only_loss"],
-        "completed_epochs_without_improvement": (completed_epochs_without_improvement),
         "runtime_seconds": time.perf_counter() - started,
         "peak_allocated_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
         "validation_split_used": False,
         "test_split_used": False,
     }
+    if is_exp2:
+        summary.update(
+            {
+                "requested_sft_epochs": plan["epochs"],
+                "completed_sft_epochs": completed_epochs,
+                "final_checkpoint_epoch": completed_epochs,
+                "checkpoint_selection": "final_requested_epoch",
+                "early_stopping_enabled": False,
+                "dev_split_used": False,
+            }
+        )
+    else:
+        assert best_epoch_record is not None
+        summary.update(
+            {
+                "per_epoch_dev_loss": [
+                    {
+                        "epoch": record["epoch"],
+                        "dev_answer_only_loss": record["dev_answer_only_loss"],
+                    }
+                    for record in epoch_records
+                ],
+                "selected_epoch": best_epoch_record["epoch"],
+                "early_stopped": early_stopped,
+                "best_dev_normalized_exact_match": best_epoch_record[
+                    "dev_overall_normalized_exact_match"
+                ],
+                "best_dev_answer_only_loss": best_epoch_record[
+                    "dev_answer_only_loss"
+                ],
+                "completed_epochs_without_improvement": (
+                    completed_epochs_without_improvement
+                ),
+            }
+        )
     write_json(output_checkpoint / "training_metadata.json", summary)
     log_records.append(summary)
     write_jsonl(train_log_path, log_records)

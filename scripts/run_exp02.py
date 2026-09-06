@@ -47,7 +47,7 @@ from experiment import (
     resolve_model_checkpoint,
     verify_checkpoint_layers,
 )
-from utils.hashing import hash_file
+from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json
 
 
@@ -356,7 +356,6 @@ def _verify_dataset_bundle(
         (condition["database"], "dataset database"),
         (condition["manifest_path"], "dataset manifest"),
         (condition["cpt_dir"] / "book_readable.txt", "CPT readable book"),
-        (condition["cpt_dir"] / "train.txt", "CPT train text"),
         (condition["cpt_manifest"], "CPT manifest"),
     ):
         _require_file(artifact, label)
@@ -387,10 +386,19 @@ def _verify_qa_bundle(
     _require_file(root / "validation" / "manifest.json", "validation QA manifest")
     _require_file(root / "test" / "manifest.json", "test QA manifest")
     _require_file(root / "target_sft" / "train" / "manifest.json", "SFT train manifest")
-    _require_file(root / "target_sft" / "dev" / "manifest.json", "SFT dev manifest")
+    if (root / "target_sft" / "dev").exists():
+        raise ValueError("Experiment-2 QA bundle must not contain target_sft/dev")
 
     root_manifest = read_json(root_manifest_path)
     sft_manifest = read_json(sft_manifest_path)
+    stale_sft_fields = {
+        "dev_chain_count",
+        "dev_chain_indices",
+        "dev_chain_indices_sha256",
+        "dev_manifest_sha256",
+    }
+    if stale_sft_fields & sft_manifest.keys():
+        raise ValueError("Experiment-2 target-SFT manifest contains stale dev fields")
     expected_t = dataset_condition["T"]
     expected_n = dataset_condition["N"]
 
@@ -418,6 +426,32 @@ def _verify_qa_bundle(
         != dataset_condition["manifest"].get("database_sha256")
     ):
         raise ValueError("QA source database hash does not match the dataset")
+    if sft_manifest.get("train_chain_indices") != root_manifest.get(
+        "reserved_chain_indices"
+    ):
+        raise ValueError("SFT train chains do not equal all reserved QA chains")
+    train_indices = sft_manifest["train_chain_indices"]
+    assignments = {"train": train_indices}
+    expected_train_hash = hash_json_object(train_indices)
+    if (
+        sft_manifest.get("sft_split_method_version") != "all_reserved_train_v1"
+        or sft_manifest.get("train_chain_count") != len(train_indices)
+        or sft_manifest.get("train_chain_indices_sha256") != expected_train_hash
+        or sft_manifest.get("chain_assignment_hashes") != {
+            "train": expected_train_hash
+        }
+        or sft_manifest.get("target_sft_chain_assignments_sha256")
+        != hash_json_object(assignments)
+    ):
+        raise ValueError("Experiment-2 target-SFT chain provenance is inconsistent")
+    if sft_manifest.get("source_evaluation_split_manifest_sha256") != hash_file(
+        root_manifest_path
+    ):
+        raise ValueError("target-SFT source evaluation-manifest hash is inconsistent")
+    if sft_manifest.get("train_manifest_sha256") != hash_file(
+        root / "target_sft" / "train" / "manifest.json"
+    ):
+        raise ValueError("target-SFT train manifest hash is inconsistent")
 
     return {
         "root": root,
@@ -533,6 +567,7 @@ def _verify_cpt_checkpoint(
     selected_tables: tuple[str, ...],
     model_name: str,
     layers: int,
+    requested_epochs: int,
 ) -> dict[str, Any]:
     checkpoint = _resolve_path(path)
     _require_dir(checkpoint, "CPT checkpoint")
@@ -557,6 +592,19 @@ def _verify_cpt_checkpoint(
                 f"CPT checkpoint {key} mismatch: expected {value!r}, "
                 f"found {metadata.get(key)!r}"
             )
+    for key, value in (
+        ("requested_cpt_epochs", requested_epochs),
+        ("completed_cpt_epochs", requested_epochs),
+        ("final_checkpoint_epoch", requested_epochs),
+        ("completed_book_passes", requested_epochs),
+    ):
+        if metadata.get(key) != value:
+            raise ValueError(
+                f"CPT checkpoint {key} mismatch: expected {value!r}, "
+                f"found {metadata.get(key)!r}"
+            )
+    if metadata.get("cpt_source_text") != "book_readable.txt":
+        raise ValueError("CPT checkpoint source text must be book_readable.txt")
 
     checkpoint_tables = _selected_tables_from_checkpoint_metadata(metadata)
     if checkpoint_tables is not None and tuple(checkpoint_tables) != selected_tables:
@@ -591,6 +639,7 @@ def _verify_sft_checkpoint(
     layers: int,
     table_count: int,
     fact_count: int,
+    requested_epochs: int,
 ) -> dict[str, Any]:
     checkpoint = _resolve_path(path)
     _require_dir(checkpoint, "SFT checkpoint")
@@ -614,6 +663,49 @@ def _verify_sft_checkpoint(
             raise ValueError(
                 f"SFT checkpoint {key} mismatch: expected {value!r}, "
                 f"found {metadata.get(key)!r}"
+            )
+    for key, value in (
+        ("requested_sft_epochs", requested_epochs),
+        ("completed_sft_epochs", requested_epochs),
+        ("final_checkpoint_epoch", requested_epochs),
+    ):
+        if metadata.get(key) != value:
+            raise ValueError(
+                f"SFT checkpoint {key} mismatch: expected {value!r}, "
+                f"found {metadata.get(key)!r}"
+            )
+    if metadata.get("checkpoint_selection") != "final_requested_epoch":
+        raise ValueError("SFT checkpoint must be the final requested epoch")
+    if metadata.get("early_stopping_enabled") is not False:
+        raise ValueError("Experiment-2 SFT checkpoint must disable early stopping")
+    if metadata.get("dev_split_used") is not False:
+        raise ValueError("Experiment-2 SFT checkpoint must not use a dev split")
+    stale_fields = {
+        "qa_dev_split",
+        "dev_example_count",
+        "dev_hop_counts",
+        "dev_chain_count",
+        "dev_manifest_sha256",
+        "dev_input_file_sha256",
+        "selected_epoch",
+        "early_stopped",
+        "best_dev_normalized_exact_match",
+        "best_dev_answer_only_loss",
+        "completed_epochs_without_improvement",
+        "early_stopping_patience",
+        "per_epoch_dev_loss",
+    }
+    present = sorted(stale_fields & metadata.keys())
+    if present:
+        raise ValueError(f"SFT checkpoint contains stale dev-selection fields: {present}")
+    for section_name in ("training", "provenance"):
+        section = metadata.get(section_name, {})
+        if (
+            isinstance(section, dict)
+            and {"dev_split", "early_stopping_patience"} & section.keys()
+        ):
+            raise ValueError(
+                f"SFT checkpoint {section_name} contains stale dev-selection fields"
             )
 
     source_checkpoint = metadata.get("source_checkpoint")
@@ -897,6 +989,7 @@ def main() -> None:
                 selected_tables=selected_tables,
                 model_name=args.model,
                 layers=layers,
+                requested_epochs=resolved_config["training"]["cpt_epochs"],
             )
             _reuse_stage(
                 state=state,
@@ -934,6 +1027,7 @@ def main() -> None:
                     selected_tables=selected_tables,
                     model_name=args.model,
                     layers=layers,
+                    requested_epochs=resolved_config["training"]["cpt_epochs"],
                 )
                 return checkpoint
 
@@ -1045,6 +1139,7 @@ def main() -> None:
                 layers=layers,
                 table_count=dataset_condition["T"],
                 fact_count=dataset_condition["N"],
+                requested_epochs=resolved_config["target_sft"]["epochs"],
             )
             _reuse_stage(
                 state=state,
@@ -1084,6 +1179,7 @@ def main() -> None:
                     layers=layers,
                     table_count=dataset_condition["T"],
                     fact_count=dataset_condition["N"],
+                    requested_epochs=resolved_config["target_sft"]["epochs"],
                 )
                 return checkpoint
 

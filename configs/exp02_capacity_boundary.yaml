@@ -22,7 +22,6 @@ data:
     identifier_fields_per_chain: 12
 
 training:
-  fact_exposure: 4
   cpt_batch_size: 32
   cpt_epochs: 20
   gradient_accumulation_steps: 1
@@ -46,8 +45,6 @@ training:
 target_sft:
   dataset_dir: target_sft
   training_split: train
-  dev_split: dev
-  early_stopping_patience: 3
   batch_size: 32
   gradient_accumulation_steps: 1
   epochs: 10

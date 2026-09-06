@@ -16,7 +16,13 @@ from data.materialize import (
     build_exp2_database_manifest,
     materialize_selected_tables_database,
 )
-from data.qa import generate_qa_candidates, load_verified_semantic_chains
+from data.qa import (
+    assign_exp2_target_sft_splits,
+    generate_condition_qa,
+    generate_qa_candidates,
+    generate_target_sft_qa,
+    load_verified_semantic_chains,
+)
 from data.serialize import database_schema_sha256, serialize_database_cpt
 from data.world import (
     NATURAL_IDENTIFIER_FIELDS,
@@ -27,9 +33,9 @@ from data.world import (
     validate_selected_tables,
 )
 from experiment import resolve_model_checkpoint, verify_checkpoint_layers
-from training.cpt import build_cpt_training_plan
-from training.target_sft import build_target_sft_training_plan
-from utils.hashing import hash_file
+from training.cpt import build_cpt_training_plan, verify_cpt_artifacts
+from training.target_sft import build_target_sft_training_plan, load_target_sft_dataset
+from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json, read_text, write_json
 from utils.paths import (
     EXP02_RESULTS_DIR,
@@ -97,7 +103,7 @@ def _bundle(tmp_path: Path, config: dict, tables: list[str], chains: int) -> Pat
         config,
         database,
         bundle / "manifest.json",
-        cpt / "train.txt",
+        None,
         readable_book_path=cpt / "book_readable.txt",
         expected_table_count=len(selected),
         expected_logical_fact_count=chains * facts_per_selected_chain(selected),
@@ -126,6 +132,243 @@ def test_exp2_hidden_fk_support_preserves_schema_but_not_exposure(
     assert "Student Records" in book
     assert "Enrollment Records" not in book
     assert "Course Records" not in book
+    assert not (bundle / "cpt" / "train.txt").exists()
+    cpt_manifest = read_json(bundle / "cpt" / "manifest.json")
+    assert cpt_manifest["cpt_source_text"] == "book_readable.txt"
+    assert cpt_manifest["book_copies_per_cpt_epoch"] == 1
+    assert "fact_exposure" not in cpt_manifest
+    assert "train_text_sha256" not in cpt_manifest
+    assert not any(key.endswith("_per_exposure") for key in cpt_manifest)
+
+
+def _exp2_qa_bundle(
+    tmp_path: Path, config: dict, *, chains: int = 5
+) -> tuple[Path, Path, dict]:
+    dataset = _bundle(tmp_path / "dataset", config, ["continent"], chains)
+    qa_root = tmp_path / "qa"
+    generate_condition_qa(
+        config,
+        dataset / "database.sqlite",
+        dataset / "manifest.json",
+        qa_root,
+        expected_table_count=1,
+        expected_logical_fact_count=chains * 2,
+        source_training_data_dir=dataset,
+        generation_timestamp="20260905_120000_000000",
+    )
+    result = generate_target_sft_qa(
+        config,
+        dataset / "database.sqlite",
+        dataset / "manifest.json",
+        qa_root,
+        expected_table_count=1,
+        expected_logical_fact_count=chains * 2,
+        source_training_data_dir=dataset,
+        generation_timestamp="20260905_120000_000000",
+    )
+    return dataset, qa_root, result
+
+
+def test_exp2_target_sft_uses_all_reserved_chains_and_creates_no_dev(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    _, qa_root, result = _exp2_qa_bundle(tmp_path, exp2_config)
+    evaluation_manifest = read_json(qa_root / "split_manifest.json")
+    sft_manifest = result["split_manifest"]
+    assert sft_manifest["train_chain_indices"] == evaluation_manifest[
+        "reserved_chain_indices"
+    ]
+    assert sft_manifest["train_chain_count"] == evaluation_manifest[
+        "reserved_chain_count"
+    ]
+    assert assign_exp2_target_sft_splits(
+        evaluation_manifest["reserved_chain_indices"]
+    ) == {"train": evaluation_manifest["reserved_chain_indices"]}
+    assert not (qa_root / "target_sft" / "dev").exists()
+    assert "dev_manifest" not in result
+    assert not any(key.startswith("dev_") for key in sft_manifest)
+
+
+def test_exp2_target_sft_generation_does_not_modify_validation_or_test(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    dataset = _bundle(tmp_path / "dataset", exp2_config, ["continent"], 5)
+    qa_root = tmp_path / "qa"
+    generate_condition_qa(
+        exp2_config,
+        dataset / "database.sqlite",
+        dataset / "manifest.json",
+        qa_root,
+        expected_table_count=1,
+        expected_logical_fact_count=10,
+        source_training_data_dir=dataset,
+        generation_timestamp="20260905_120000_000000",
+    )
+    held_out_paths = sorted(
+        path
+        for split in ("validation", "test")
+        for path in (qa_root / split).iterdir()
+        if path.is_file()
+    )
+    before = {path: hash_file(path) for path in held_out_paths}
+    generate_target_sft_qa(
+        exp2_config,
+        dataset / "database.sqlite",
+        dataset / "manifest.json",
+        qa_root,
+        expected_table_count=1,
+        expected_logical_fact_count=10,
+        source_training_data_dir=dataset,
+        generation_timestamp="20260905_120000_000000",
+    )
+    assert {path: hash_file(path) for path in held_out_paths} == before
+    manifest = read_json(qa_root / "target_sft" / "split_manifest.json")
+    assert not (
+        set(manifest["train_chain_indices"])
+        & set(manifest["validation_chain_indices"])
+    )
+    assert not set(manifest["train_chain_indices"]) & set(
+        manifest["test_chain_indices"]
+    )
+    assert not set(manifest["validation_chain_indices"]) & set(
+        manifest["test_chain_indices"]
+    )
+
+
+def test_exp2_sft_loader_reads_train_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exp2_config: dict,
+) -> None:
+    _, qa_root, _ = _exp2_qa_bundle(tmp_path, exp2_config)
+    import training.target_sft as target_sft_module
+
+    original_read_jsonl = target_sft_module.read_jsonl
+
+    def train_only_read_jsonl(path: Path):
+        if "validation" in Path(path).parts or "test" in Path(path).parts:
+            pytest.fail("Exp02 SFT loaded held-out QA records")
+        return original_read_jsonl(path)
+
+    monkeypatch.setattr(target_sft_module, "read_jsonl", train_only_read_jsonl)
+    train_records, dev_records, provenance = load_target_sft_dataset(
+        qa_root,
+        dataset_dir="target_sft",
+        training_split="train",
+        dev_split=None,
+        table_count=1,
+        fact_count=10,
+    )
+    assert train_records
+    assert dev_records == []
+    assert provenance["dev_split_used"] is False
+    assert provenance["validation_split_used"] is False
+    assert provenance["test_split_used"] is False
+
+
+def test_exp2_cpt_authenticates_and_reads_the_single_book_directly(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    bundle = _bundle(tmp_path, exp2_config, ["continent"], 5)
+    provenance = verify_cpt_artifacts(
+        exp2_config,
+        table_count=1,
+        fact_count=10,
+        database_path=bundle / "database.sqlite",
+        database_manifest_path=bundle / "manifest.json",
+        readable_book_path=bundle / "cpt" / "book_readable.txt",
+        train_text_path=bundle / "cpt" / "train.txt",
+        cpt_manifest_path=bundle / "cpt" / "manifest.json",
+    )
+    assert provenance["cpt_source_text"] == "book_readable.txt"
+    assert provenance["cpt_source_path"] == str(
+        (bundle / "cpt" / "book_readable.txt").resolve()
+    )
+    assert provenance["book_copies_per_cpt_epoch"] == 1
+    assert not (bundle / "cpt" / "train.txt").exists()
+
+
+def test_exp2_exact_epoch_plans_have_no_hidden_exposure_or_dev_selection(
+    exp2_config: dict,
+) -> None:
+    config = deepcopy(exp2_config)
+    config["training"]["cpt_epochs"] = 200
+    config["target_sft"]["epochs"] = 200
+    cpt_plan = build_cpt_training_plan(
+        config, table_count=1, fact_count=10, sequence_count=3
+    )
+    sft_plan = build_target_sft_training_plan(
+        config, table_count=1, fact_count=10, example_count=5
+    )
+    assert cpt_plan["requested_cpt_epochs"] == 200
+    assert cpt_plan["requested_book_passes"] == 200
+    assert cpt_plan["total_optimizer_steps"] == 200
+    assert "effective_fact_exposure" not in cpt_plan
+    assert sft_plan["requested_sft_epochs"] == 200
+    assert sft_plan["total_optimizer_steps"] == 200
+    assert sft_plan["checkpoint_selection"] == "final_requested_epoch"
+    assert sft_plan["early_stopping_enabled"] is False
+    assert sft_plan["dev_split_used"] is False
+    assert "early_stopping_patience" not in sft_plan
+
+
+def test_exp2_sft_checkpoint_provenance_requires_the_final_requested_epoch(
+    tmp_path: Path,
+) -> None:
+    qa_root = tmp_path / "qa"
+    write_json(qa_root / "target_sft" / "split_manifest.json", {"version": 1})
+    cpt_checkpoint = tmp_path / "cpt"
+    cpt_checkpoint.mkdir()
+    checkpoint = tmp_path / "sft"
+    checkpoint.mkdir()
+    write_json(checkpoint / "config.json", {"model_type": "gpt2", "n_layer": 12})
+    metadata = {
+        "experiment": "exp02_capacity_boundary",
+        "stage": "target-sft",
+        "model": "gpt2",
+        "T": 1,
+        "N": 10,
+        "L": 12,
+        "source_checkpoint": str(cpt_checkpoint.resolve()),
+        "requested_sft_epochs": 200,
+        "completed_sft_epochs": 200,
+        "final_checkpoint_epoch": 200,
+        "checkpoint_selection": "final_requested_epoch",
+        "early_stopping_enabled": False,
+        "dev_split_used": False,
+        "target_sft_split_manifest_sha256": hash_file(
+            qa_root / "target_sft" / "split_manifest.json"
+        ),
+        "provenance": {"selected_tables": ["continent"]},
+    }
+    write_json(checkpoint / "training_metadata.json", metadata)
+    qa = {"root": qa_root}
+    exp2_runner._verify_sft_checkpoint(
+        checkpoint,
+        qa=qa,
+        cpt_checkpoint=cpt_checkpoint.resolve(),
+        selected_tables=("continent",),
+        model_name="gpt2",
+        layers=12,
+        table_count=1,
+        fact_count=10,
+        requested_epochs=200,
+    )
+    metadata["completed_sft_epochs"] = 199
+    metadata["final_checkpoint_epoch"] = 199
+    write_json(checkpoint / "training_metadata.json", metadata)
+    with pytest.raises(ValueError, match="completed_sft_epochs mismatch"):
+        exp2_runner._verify_sft_checkpoint(
+            checkpoint,
+            qa=qa,
+            cpt_checkpoint=cpt_checkpoint.resolve(),
+            selected_tables=("continent",),
+            model_name="gpt2",
+            layers=12,
+            table_count=1,
+            fact_count=10,
+            requested_epochs=200,
+        )
 
 
 def test_exp2_determinism_and_nested_prefixes(exp2_config: dict) -> None:
@@ -577,12 +820,26 @@ def test_exp2_explicit_architecture_depth_override(tmp_path: Path) -> None:
 def test_exp2_config_has_no_fixed_t_or_n_sweeps(exp2_config: dict) -> None:
     assert "t_sweep" not in exp2_config["data"]
     assert "n_sweep" not in exp2_config["data"]
-    assert build_cpt_training_plan(
+    assert "fact_exposure" not in exp2_config["training"]
+    assert "dev_split" not in exp2_config["target_sft"]
+    assert "early_stopping_patience" not in exp2_config["target_sft"]
+    cpt_plan = build_cpt_training_plan(
         exp2_config, table_count=1, fact_count=500, sequence_count=2
-    )["L"] == 12
-    assert build_target_sft_training_plan(
+    )
+    assert cpt_plan["L"] == 12
+    assert cpt_plan["cpt_source_text"] == "book_readable.txt"
+    assert cpt_plan["book_passes_per_epoch"] == 1
+    assert cpt_plan["requested_book_passes"] == cpt_plan["epochs"]
+    assert "fact_exposure" not in cpt_plan
+    sft_plan = build_target_sft_training_plan(
         exp2_config, table_count=1, fact_count=500, example_count=2
-    )["L"] == 12
+    )
+    assert sft_plan["L"] == 12
+    assert sft_plan["requested_sft_epochs"] == sft_plan["epochs"]
+    assert sft_plan["early_stopping_enabled"] is False
+    assert sft_plan["checkpoint_selection"] == "final_requested_epoch"
+    assert sft_plan["dev_split_used"] is False
+    assert "early_stopping_patience" not in sft_plan
 
 
 @pytest.mark.parametrize(
@@ -656,7 +913,6 @@ def _cached_dataset_bundle(
     manifest_path = bundle / "manifest.json"
     write_json(manifest_path, manifest)
     (cpt_dir / "book_readable.txt").write_text("book\n", encoding="utf-8")
-    (cpt_dir / "train.txt").write_text("train\n", encoding="utf-8")
     write_json(
         cpt_dir / "manifest.json",
         {
@@ -666,6 +922,10 @@ def _cached_dataset_bundle(
             "selected_tables": tables,
             "source_database_sha256": hash_file(database),
             "source_database_manifest_sha256": hash_file(manifest_path),
+            "readable_book_sha256": hash_file(cpt_dir / "book_readable.txt"),
+            "cpt_source_text": "book_readable.txt",
+            "book_copies_per_cpt_epoch": 1,
+            "logical_facts_in_book": fact_count,
         },
     )
     return bundle
@@ -684,7 +944,6 @@ def _cached_qa_bundle(root: Path, name: str, *, dataset: Path) -> Path:
         "validation/manifest.json",
         "test/manifest.json",
         "target_sft/train/manifest.json",
-        "target_sft/dev/manifest.json",
     ):
         path = qa_root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -694,6 +953,7 @@ def _cached_qa_bundle(root: Path, name: str, *, dataset: Path) -> Path:
         "T": condition["T"],
         "requested_N": condition["N"],
         "selected_tables": condition["selected_tables"],
+        "train_chain_indices": [0],
     }
     write_json(
         qa_root / "split_manifest.json",
@@ -701,9 +961,31 @@ def _cached_qa_bundle(root: Path, name: str, *, dataset: Path) -> Path:
             **shared,
             "source_training_data_dir": str(dataset.resolve()),
             "source_database_sha256": condition["manifest"]["database_sha256"],
+            "reserved_chain_indices": [0],
+            "validation_chain_indices": [1],
+            "test_chain_indices": [2],
         },
     )
-    write_json(qa_root / "target_sft" / "split_manifest.json", shared)
+    train_hash = hash_json_object([0])
+    write_json(
+        qa_root / "target_sft" / "split_manifest.json",
+        {
+            **shared,
+            "sft_split_method_version": "all_reserved_train_v1",
+            "train_chain_count": 1,
+            "train_chain_indices_sha256": train_hash,
+            "chain_assignment_hashes": {"train": train_hash},
+            "target_sft_chain_assignments_sha256": hash_json_object(
+                {"train": [0]}
+            ),
+            "source_evaluation_split_manifest_sha256": hash_file(
+                qa_root / "split_manifest.json"
+            ),
+            "train_manifest_sha256": hash_file(
+                qa_root / "target_sft" / "train" / "manifest.json"
+            ),
+        },
+    )
     return qa_root
 
 

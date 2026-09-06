@@ -195,10 +195,12 @@ def load_exp2_dataset_condition(training_data_dir: str | Path) -> dict[str, Any]
     manifest_path = bundle / "manifest.json"
     database_path = bundle / "database.sqlite"
     cpt_manifest_path = bundle / "cpt" / "manifest.json"
+    readable_book_path = bundle / "cpt" / "book_readable.txt"
     for path, label in (
         (manifest_path, "dataset manifest"),
         (database_path, "dataset database"),
         (cpt_manifest_path, "CPT manifest"),
+        (readable_book_path, "CPT readable book"),
     ):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(f"{label} is missing or empty: {path}")
@@ -220,6 +222,29 @@ def load_exp2_dataset_condition(training_data_dir: str | Path) -> dict[str, Any]
         or cpt_manifest.get("source_database_manifest_sha256") != hash_file(manifest_path)
     ):
         raise ValueError("CPT manifest is incompatible with its Experiment-2 dataset bundle")
+    if (bundle / "cpt" / "train.txt").exists():
+        raise ValueError("Experiment-2 dataset bundle must not contain CPT train.txt")
+    if cpt_manifest.get("cpt_source_text") != "book_readable.txt":
+        raise ValueError("Experiment-2 CPT source text must be book_readable.txt")
+    if cpt_manifest.get("readable_book_sha256") != hash_file(readable_book_path):
+        raise ValueError("Experiment-2 readable book hash does not match its manifest")
+    if cpt_manifest.get("book_copies_per_cpt_epoch") != 1:
+        raise ValueError("Experiment-2 CPT must use exactly one book copy per epoch")
+    if cpt_manifest.get("logical_facts_in_book") != manifest.get("requested_N"):
+        raise ValueError("Experiment-2 readable-book fact count is inconsistent")
+    stale_cpt_fields = {
+        "fact_exposure",
+        "readable_book_copy_count_in_train_text",
+        "serialized_logical_fact_occurrences",
+        "train_text_sha256",
+        "train_text_byte_count",
+        "train_text_character_count",
+        "train_text_line_count",
+    }
+    if stale_cpt_fields & cpt_manifest.keys() or any(
+        key.endswith("_per_exposure") for key in cpt_manifest
+    ):
+        raise ValueError("Experiment-2 CPT manifest contains stale exposure fields")
     fact_count = manifest.get("requested_N")
     layers = manifest.get("facts_per_selected_chain")
     chains = manifest.get("selected_chain_count")

@@ -807,7 +807,7 @@ def serialize_database_cpt(
     config: dict[str, Any],
     database_path: str | Path,
     database_manifest_path: str | Path,
-    train_text_path: str | Path,
+    train_text_path: str | Path | None = None,
     *,
     readable_book_path: str | Path | None = None,
     expected_table_count: int | None = None,
@@ -815,11 +815,15 @@ def serialize_database_cpt(
 ) -> dict[str, Any]:
     database_path = Path(database_path)
     database_manifest_path = Path(database_manifest_path)
-    train_text_path = Path(train_text_path)
+    train_text_path = Path(train_text_path) if train_text_path is not None else None
     readable_book_path = (
         Path(readable_book_path)
         if readable_book_path is not None
-        else train_text_path.with_name("book_readable.txt")
+        else (
+            train_text_path.with_name("book_readable.txt")
+            if train_text_path is not None
+            else database_manifest_path.parent / "cpt" / "book_readable.txt"
+        )
     )
     for artifact_path, label in (
         (database_path, "database"),
@@ -865,6 +869,10 @@ def serialize_database_cpt(
         )
 
     is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    if is_exp2 and train_text_path is not None and train_text_path.exists():
+        raise FileExistsError(
+            f"Experiment-2 CPT must not contain train.txt: {train_text_path}"
+        )
     builder = build_selected_readable_database_book if is_exp2 else build_readable_database_book
     readable_book, metadata = builder(database_path, database_manifest)
     expected = {
@@ -901,17 +909,8 @@ def serialize_database_cpt(
         if metadata[key] != expected_value:
             raise ValueError(f"readable database book {key} does not match its manifest")
 
-    fact_exposure = config["training"]["fact_exposure"]
-    if (
-        isinstance(fact_exposure, bool)
-        or not isinstance(fact_exposure, int)
-        or fact_exposure <= 0
-    ):
-        raise ValueError("training.fact_exposure must be a positive integer")
-    train_text = readable_book * fact_exposure
     write_text(readable_book_path, readable_book)
-    write_text(train_text_path, train_text)
-    return {
+    result = {
         "format_version": SERIALIZATION_FORMAT_VERSION,
         "serialization_style": SERIALIZATION_STYLE,
         "experiment_name": config["experiment"]["name"],
@@ -923,14 +922,9 @@ def serialize_database_cpt(
         "selected_chain_count": database_manifest.get("selected_chain_count"),
         "source_database_sha256": database_sha256,
         "source_database_manifest_sha256": hash_file(database_manifest_path),
-        "fact_exposure": fact_exposure,
-        "readable_book_copy_count_in_train_text": fact_exposure,
         "logical_facts_per_exposure": metadata["logical_fact_occurrences"],
         "attribute_facts_per_exposure": metadata["attribute_fact_occurrences"],
         "relation_facts_per_exposure": metadata["relation_fact_occurrences"],
-        "serialized_logical_fact_occurrences": (
-            metadata["logical_fact_occurrences"] * fact_exposure
-        ),
         "logical_fact_coverage_sha256": metadata[
             "logical_fact_coverage_sha256"
         ],
@@ -970,7 +964,6 @@ def serialize_database_cpt(
             "record_groups": "database-manifest position_partition order",
             "rows": "ascending SQLite rowid within each physical record group",
             "entities": "ascending semantic position within each physical row",
-            "exposures": "identical copies of book_readable.txt",
         },
         "readable_book_sha256": hash_text(readable_book),
         "readable_book_byte_count": len(readable_book.encode("utf-8")),
@@ -979,8 +972,79 @@ def serialize_database_cpt(
         "sentence_count": metadata["instance_sentence_count"] + metadata["schema_description_sentence_count"],
         "character_count": len(readable_book),
         "byte_count": len(readable_book.encode("utf-8")),
-        "train_text_sha256": hash_text(train_text),
-        "train_text_byte_count": len(train_text.encode("utf-8")),
-        "train_text_character_count": len(train_text),
-        "train_text_line_count": train_text.count("\n"),
     }
+    if is_exp2:
+        per_exposure_fields = {
+            "logical_facts_per_exposure",
+            "attribute_facts_per_exposure",
+            "relation_facts_per_exposure",
+            "physical_rows_per_exposure",
+            "logical_entities_per_exposure",
+            "instance_sentence_count_per_exposure",
+            "schema_description_sentence_count_per_exposure",
+            "record_organization_sentence_count_per_exposure",
+            "schema_relationship_count_per_exposure",
+            "schema_foreign_key_count_per_exposure",
+            "schema_intra_table_relation_count_per_exposure",
+        }
+        for field in per_exposure_fields:
+            result.pop(field)
+        result.update(
+            {
+                "cpt_source_text": "book_readable.txt",
+                "book_copies_per_cpt_epoch": 1,
+                "logical_facts_in_book": metadata["logical_fact_occurrences"],
+                "attribute_facts_in_book": metadata["attribute_fact_occurrences"],
+                "relation_facts_in_book": metadata["relation_fact_occurrences"],
+                "physical_rows_in_book": metadata["physical_row_count"],
+                "logical_entities_in_book": metadata["logical_entity_count"],
+                "instance_sentence_count_in_book": metadata[
+                    "instance_sentence_count"
+                ],
+                "schema_description_sentence_count_in_book": metadata[
+                    "schema_description_sentence_count"
+                ],
+                "record_organization_sentence_count_in_book": metadata[
+                    "record_organization_sentence_count"
+                ],
+                "schema_relationship_count_in_book": metadata[
+                    "schema_relationship_count"
+                ],
+                "schema_foreign_key_count_in_book": metadata[
+                    "schema_foreign_key_count"
+                ],
+                "schema_intra_table_relation_count_in_book": metadata[
+                    "schema_intra_table_relation_count"
+                ],
+            }
+        )
+        return result
+
+    if train_text_path is None:
+        raise ValueError("train_text_path is required outside Experiment 2")
+    fact_exposure = config["training"]["fact_exposure"]
+    if (
+        isinstance(fact_exposure, bool)
+        or not isinstance(fact_exposure, int)
+        or fact_exposure <= 0
+    ):
+        raise ValueError("training.fact_exposure must be a positive integer")
+    train_text = readable_book * fact_exposure
+    write_text(train_text_path, train_text)
+    result.update(
+        {
+            "fact_exposure": fact_exposure,
+            "readable_book_copy_count_in_train_text": fact_exposure,
+            "serialized_logical_fact_occurrences": (
+                metadata["logical_fact_occurrences"] * fact_exposure
+            ),
+            "train_text_sha256": hash_text(train_text),
+            "train_text_byte_count": len(train_text.encode("utf-8")),
+            "train_text_character_count": len(train_text),
+            "train_text_line_count": train_text.count("\n"),
+        }
+    )
+    result["serialization_order"]["exposures"] = (
+        "identical copies of book_readable.txt"
+    )
+    return result

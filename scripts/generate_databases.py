@@ -173,9 +173,18 @@ def _serialize_condition_cpt(
     readable_book_path = cpt_dir / "book_readable.txt"
     train_text_path = cpt_dir / "train.txt"
     cpt_manifest_path = cpt_dir / "manifest.json"
+    is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
+    if is_exp2 and train_text_path.exists():
+        raise FileExistsError(
+            f"Experiment-2 CPT directory contains stale train.txt: {train_text_path}"
+        )
     occupied = [
         path
-        for path in (readable_book_path, train_text_path, cpt_manifest_path)
+        for path in (
+            (readable_book_path, cpt_manifest_path)
+            if is_exp2
+            else (readable_book_path, train_text_path, cpt_manifest_path)
+        )
         if path.exists() and path.stat().st_size
     ]
     if occupied:
@@ -187,21 +196,27 @@ def _serialize_condition_cpt(
         config,
         database_path=database_path,
         database_manifest_path=database_manifest_path,
-        train_text_path=train_text_path,
+        train_text_path=None if is_exp2 else train_text_path,
         readable_book_path=readable_book_path,
         expected_table_count=table_count,
         expected_logical_fact_count=logical_fact_count,
     )
     write_json(cpt_manifest_path, cpt_manifest)
-    try:
-        displayed_train_path = train_text_path.relative_to(PROJECT_ROOT)
-    except ValueError:
-        displayed_train_path = train_text_path
-    print(
-        f"cpt: T={table_count}, N={logical_fact_count}, "
-        f"exposures={cpt_manifest['fact_exposure']}, "
-        f"book={readable_book_path.name}, train={displayed_train_path}"
-    )
+    if is_exp2:
+        print(
+            f"cpt: T={table_count}, N={logical_fact_count}, "
+            f"source={readable_book_path.name}, copies_per_epoch=1"
+        )
+    else:
+        try:
+            displayed_train_path = train_text_path.relative_to(PROJECT_ROOT)
+        except ValueError:
+            displayed_train_path = train_text_path
+        print(
+            f"cpt: T={table_count}, N={logical_fact_count}, "
+            f"exposures={cpt_manifest['fact_exposure']}, "
+            f"book={readable_book_path.name}, train={displayed_train_path}"
+        )
     return cpt_manifest
 
 
