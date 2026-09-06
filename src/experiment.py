@@ -12,7 +12,72 @@ from utils.paths import BASE_MODELS_DIR, EXP01_GENERATED_DATABASES_DIR
 
 MODEL_REGISTRY = {
     "gpt2": {"relative_path": "gpt2", "native_layers": 12},
+    "qwen3-0.6b-base": {"relative_path": "qwen3-0.6b-base", "native_layers": 28},
 }
+
+
+MODEL_ARCHITECTURE_FIELDS = {
+    "native_layers": ("n_layer", "num_hidden_layers"),
+    "hidden_size": ("n_embd", "hidden_size"),
+    "attention_heads": ("n_head", "num_attention_heads"),
+    "context_length": ("n_positions", "n_ctx", "max_position_embeddings"),
+}
+MODEL_LAYER_FIELDS = MODEL_ARCHITECTURE_FIELDS["native_layers"]
+
+
+def _positive_config_int(
+    checkpoint_config: dict[str, Any], names: tuple[str, ...], *, config_path: Path
+) -> int:
+    for name in names:
+        value = checkpoint_config.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"checkpoint config field {name} is not a positive integer: "
+                f"{config_path}"
+            )
+        return value
+    raise ValueError(
+        f"checkpoint config does not declare one of {', '.join(names)}: "
+        f"{config_path}"
+    )
+
+
+def read_checkpoint_model_architecture(checkpoint: str | Path) -> dict[str, int]:
+    """Read model architecture metadata from a local checkpoint config.json."""
+    checkpoint = Path(checkpoint).resolve()
+    config_path = checkpoint / "config.json"
+    if not checkpoint.is_dir() or not config_path.is_file():
+        raise FileNotFoundError(f"local checkpoint is missing: {checkpoint}")
+    checkpoint_config = read_json(config_path)
+    return {
+        target: _positive_config_int(
+            checkpoint_config, sources, config_path=config_path
+        )
+        for target, sources in MODEL_ARCHITECTURE_FIELDS.items()
+    }
+
+
+def read_checkpoint_model_layers(checkpoint: str | Path) -> int:
+    """Read just the transformer layer count from a local checkpoint config.json."""
+    checkpoint = Path(checkpoint).resolve()
+    config_path = checkpoint / "config.json"
+    if not checkpoint.is_dir() or not config_path.is_file():
+        raise FileNotFoundError(f"local checkpoint is missing: {checkpoint}")
+    return _positive_config_int(
+        read_json(config_path), MODEL_LAYER_FIELDS, config_path=config_path
+    )
+
+
+def apply_checkpoint_model_config(
+    config: dict[str, Any], *, model_name: str, checkpoint: str | Path
+) -> dict[str, int]:
+    """Update config.model from the selected checkpoint without changing training settings."""
+    architecture = read_checkpoint_model_architecture(checkpoint)
+    config["model"]["name"] = model_name
+    config["model"].update(architecture)
+    return architecture
 
 
 def configured_model_layers(config: dict[str, Any]) -> int:
@@ -135,15 +200,7 @@ def verify_checkpoint_layers(
     config_path = checkpoint / "config.json"
     if not checkpoint.is_dir() or not config_path.is_file():
         raise FileNotFoundError(f"local checkpoint is missing: {checkpoint}")
-    checkpoint_config = read_json(config_path)
-    declared = checkpoint_config.get("n_layer")
-    if declared is None:
-        declared = checkpoint_config.get("num_hidden_layers")
-    if isinstance(declared, bool) or not isinstance(declared, int) or declared <= 0:
-        raise ValueError(
-            f"checkpoint config does not declare a valid transformer layer count: "
-            f"{config_path}"
-        )
+    declared = read_checkpoint_model_layers(checkpoint)
     if declared != requested_layers:
         raise ValueError(
             f"requested L{requested_layers} but checkpoint actually has L{declared}: "
@@ -176,12 +233,7 @@ def resolve_model_checkpoint(
     config_path = checkpoint / "config.json"
     if not checkpoint.is_dir() or not config_path.is_file():
         raise FileNotFoundError(f"local model checkpoint is missing: {checkpoint}")
-    checkpoint_config = read_json(config_path)
-    native_layers = checkpoint_config.get(
-        "n_layer", checkpoint_config.get("num_hidden_layers")
-    )
-    if isinstance(native_layers, bool) or not isinstance(native_layers, int) or native_layers <= 0:
-        raise ValueError(f"model checkpoint does not declare native layer depth: {config_path}")
+    native_layers = read_checkpoint_model_layers(checkpoint)
     registered = MODEL_REGISTRY.get(model_name)
     if not explicit_override and registered and registered["native_layers"] != native_layers:
         raise ValueError(

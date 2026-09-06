@@ -44,6 +44,7 @@ from config import validate_config
 from data.world import facts_per_selected_chain, validate_selected_tables
 from experiment import (
     load_exp2_dataset_condition,
+    read_checkpoint_model_architecture,
     resolve_model_checkpoint,
     verify_checkpoint_layers,
 )
@@ -162,6 +163,7 @@ def _write_resolved_config(
     model_name: str,
     native_layers: int,
     overrides: dict[str, Any],
+    model_architecture: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     config = copy.deepcopy(_load_yaml(base_config_path))
     if config.get("experiment", {}).get("name") != EXP2_NAME:
@@ -172,6 +174,8 @@ def _write_resolved_config(
 
     config["model"]["name"] = model_name
     config["model"]["native_layers"] = native_layers
+    if model_architecture is not None:
+        config["model"].update(model_architecture)
 
     if "cpt_epochs" in overrides:
         config["training"]["cpt_epochs"] = overrides["cpt_epochs"]
@@ -863,6 +867,11 @@ def main() -> None:
             ),
         )
 
+    architecture_checkpoint = (
+        cpt_checkpoint_input if args.cpt_checkpoint is not None else resolved_base_model
+    )
+    assert architecture_checkpoint is not None
+    model_architecture = read_checkpoint_model_architecture(architecture_checkpoint)
     layers = native_layers if args.layers is None else args.layers
     if args.cpt_checkpoint is None:
         assert resolved_base_model is not None
@@ -879,6 +888,7 @@ def main() -> None:
         output_path=resolved_config_path,
         model_name=args.model,
         native_layers=native_layers,
+        model_architecture=model_architecture,
         overrides=overrides,
     )
 
@@ -1113,6 +1123,8 @@ def main() -> None:
             str(cpt_checkpoint),
             "--layers",
             str(layers),
+            "--model",
+            args.model,
             "--split",
             "validation",
         ]
@@ -1211,6 +1223,8 @@ def main() -> None:
             str(sft_checkpoint),
             "--layers",
             str(layers),
+            "--model",
+            args.model,
             "--split",
             "validation",
         ]
@@ -1243,6 +1257,8 @@ def main() -> None:
                 str(sft_checkpoint),
                 "--layers",
                 str(layers),
+                "--model",
+                args.model,
                 "--split",
                 "test",
             ]

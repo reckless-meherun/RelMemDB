@@ -1,0 +1,32 @@
+{
+  "N": 100,
+  "T": 1,
+  "book_context_in_prompts": false,
+  "deterministic_generation": true,
+  "experiment_name": "exp02_capacity_boundary",
+  "format_version": 1,
+  "method_version": "canonical_and_heldout_declarative_completion_v1",
+  "natural_language_questions": false,
+  "probe_count": 100,
+  "probe_counts": {
+    "canonical_completion": 50,
+    "heldout_declarative_completion": 50
+  },
+  "probe_source_record_ids_sha256": "1931ddebed7ca8c9fb4514a663bb21b04e9de4536097518b10cd1daf423fd412",
+  "probes_sha256": "9038983cbf3e6f41a08cd9a8d1b6d64e4fb6b7f18bba337d704334f7936b83c1",
+  "same_underlying_facts_as_cpt": true,
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "source_cpt_example_method_version": "isolated_declarative_records_v1",
+  "source_cpt_logical_fact_count": 100,
+  "source_cpt_logical_fact_coverage_sha256": "0002972d373dd3fabe36428d326710bd034114bc5003ac701454d7c22ebebe4b",
+  "source_cpt_manifest_sha256": "37c0b8472ddaeb1f96b18833528af6f2f3b501d9fb507dbc1491e072932cc923",
+  "source_cpt_record_count": 50,
+  "source_cpt_records_sha256": "8784ee2e60e650487d3bbd8f515fbe48a09acea145b05bae1317bbb8e1c5fb74",
+  "source_database_manifest_sha256": "bce0d5c9ab55e5f813019e0d124a2112cf96627f92f0b5e7e226e7bb603776a0",
+  "source_database_sha256": "ce73b995be0b4c22da55ce1daac7b816bb67c76d84657c9bd285e76cd09db5b3",
+  "source_readable_book_sha256": "af201c4b9295763fea7af1259f1a23d1cfd5c2cae6ab5c20db0268b0721880eb",
+  "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp02_capacity_boundary/T01_N100_continent_20260906_185253_302024"
+}

@@ -10,6 +10,7 @@ import pytest
 
 import scripts.evaluate as evaluate_script
 import scripts.run_exp02 as exp2_runner
+import scripts.train as train_script
 
 from config import load_config
 from data.cpt_test import generate_exp2_cpt_test, verify_exp2_cpt_test
@@ -38,6 +39,7 @@ from data.world import (
     validate_exp2_fact_count,
     validate_selected_tables,
 )
+from experiment import read_checkpoint_model_architecture
 from experiment import resolve_model_checkpoint, verify_checkpoint_layers
 from training.cpt import (
     _seeded_dataloader_generator,
@@ -648,6 +650,160 @@ def test_exp2_paths_and_model_defaults() -> None:
     assert layers == 12
 
 
+def test_exp2_qwen3_model_registry_reads_local_checkpoint_config() -> None:
+    checkpoint, layers = resolve_model_checkpoint("qwen3-0.6b-base")
+    assert checkpoint.name == "qwen3-0.6b-base"
+    assert layers == 28
+    assert read_checkpoint_model_architecture(checkpoint) == {
+        "native_layers": 28,
+        "hidden_size": 1024,
+        "attention_heads": 16,
+        "context_length": 32768,
+    }
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected"),
+    [
+        (
+            "gpt2",
+            {
+                "native_layers": 12,
+                "hidden_size": 768,
+                "attention_heads": 12,
+                "context_length": 1024,
+            },
+        ),
+        (
+            "qwen3-0.6b-base",
+            {
+                "native_layers": 28,
+                "hidden_size": 1024,
+                "attention_heads": 16,
+                "context_length": 32768,
+            },
+        ),
+    ],
+)
+def test_exp2_wrapper_resolved_config_uses_cli_model_architecture(
+    tmp_path: Path, model_name: str, expected: dict[str, int]
+) -> None:
+    checkpoint, native_layers = resolve_model_checkpoint(model_name)
+    config = exp2_runner._write_resolved_config(
+        base_config_path=Path("configs/exp02_capacity_boundary.yaml"),
+        output_path=tmp_path / "resolved_config.yaml",
+        model_name=model_name,
+        native_layers=native_layers,
+        model_architecture=read_checkpoint_model_architecture(checkpoint),
+        overrides={},
+    )
+    assert config["model"]["name"] == model_name
+    for key, value in expected.items():
+        assert config["model"][key] == value
+    assert config["training"]["context_length"] == 512
+    assert config["target_sft"]["context_length"] == 128
+    assert config["evaluation"]["context_length"] == 256
+
+
+def test_exp2_train_cpt_uses_cli_selected_qwen_model_architecture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    captured: dict[str, object] = {}
+    condition = {
+        "T": 1,
+        "N": 100,
+        "cpt_dir": tmp_path / "cpt",
+        "database": tmp_path / "database.sqlite",
+        "manifest_path": tmp_path / "manifest.json",
+        "cpt_manifest": tmp_path / "cpt" / "manifest.json",
+    }
+    monkeypatch.setattr(
+        train_script, "load_exp2_dataset_condition", lambda _: condition
+    )
+    monkeypatch.setattr(train_script, "verify_checkpoint_layers", lambda *_, **__: {})
+
+    def run_cpt(config, **kwargs):
+        captured["config"] = deepcopy(config)
+        captured["kwargs"] = kwargs
+        return {"optimizer_steps": 0}
+
+    monkeypatch.setattr(train_script, "run_cpt_training", run_cpt)
+    train_script._run_exp2(
+        argparse.Namespace(
+            stage="cpt",
+            table_count=None,
+            fact_count=None,
+            layers=None,
+            source_checkpoint=None,
+            training_data_dir=tmp_path,
+            sft_data_dir=None,
+            model="qwen3-0.6b-base",
+        ),
+        deepcopy(exp2_config),
+    )
+    config = captured["config"]
+    assert config["model"]["name"] == "qwen3-0.6b-base"
+    assert config["model"]["native_layers"] == 28
+    assert config["model"]["hidden_size"] == 1024
+    assert config["model"]["attention_heads"] == 16
+    assert captured["kwargs"]["layers"] == 28
+
+
+def test_exp2_train_target_sft_uses_cli_selected_qwen_model_architecture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    captured: dict[str, object] = {}
+    source_checkpoint = tmp_path / "qwen-cpt"
+    source_checkpoint.mkdir()
+    write_json(
+        source_checkpoint / "config.json",
+        {
+            "model_type": "qwen3",
+            "num_hidden_layers": 28,
+            "hidden_size": 1024,
+            "num_attention_heads": 16,
+            "max_position_embeddings": 32768,
+        },
+    )
+    write_json(source_checkpoint / "training_metadata.json", {})
+    sft_dir = tmp_path / "qa" / "target_sft"
+    sft_dir.mkdir(parents=True)
+    write_json(
+        sft_dir / "split_manifest.json",
+        {
+            "experiment_name": "exp02_capacity_boundary",
+            "T": 1,
+            "requested_N": 100,
+        },
+    )
+    monkeypatch.setattr(train_script, "verify_checkpoint_layers", lambda *_, **__: {})
+
+    def run_sft(config, **kwargs):
+        captured["config"] = deepcopy(config)
+        captured["kwargs"] = kwargs
+        return {"optimizer_steps": 0}
+
+    monkeypatch.setattr(train_script, "run_target_sft_training", run_sft)
+    train_script._run_exp2(
+        argparse.Namespace(
+            stage="target-sft",
+            table_count=None,
+            fact_count=None,
+            layers=None,
+            source_checkpoint=source_checkpoint,
+            training_data_dir=None,
+            sft_data_dir=sft_dir,
+            model="qwen3-0.6b-base",
+        ),
+        deepcopy(exp2_config),
+    )
+    config = captured["config"]
+    assert config["model"]["name"] == "qwen3-0.6b-base"
+    assert config["model"]["native_layers"] == 28
+    assert config["model"]["context_length"] == 32768
+    assert captured["kwargs"]["layers"] == 28
+
+
 def test_exp2_evaluation_result_path_uses_exact_n_and_timestamp() -> None:
     assert exp2_evaluation_result_dir(
         table_count=2,
@@ -700,17 +856,19 @@ def _exp2_qa_manifest() -> dict:
     }
 
 
-def _exp2_checkpoint_metadata(stage: str) -> dict:
+def _exp2_checkpoint_metadata(
+    stage: str, *, model: str = "gpt2", layers: int = 12
+) -> dict:
     metadata = {
         "experiment": "exp02_capacity_boundary",
         "stage": stage,
-        "model": "gpt2",
+        "model": model,
         "T": 2,
         "N": 1000,
-        "L": 12,
+        "L": layers,
         "checkpoint_layer_verification": {
-            "requested_layers": 12,
-            "actual_layers": 12,
+            "requested_layers": layers,
+            "actual_layers": layers,
         },
     }
     if stage == "cpt":
@@ -719,7 +877,7 @@ def _exp2_checkpoint_metadata(stage: str) -> dict:
                 "experiment_condition": {
                     "table_count": 2,
                     "fact_count": 1000,
-                    "layers": 12,
+                    "layers": layers,
                     "selected_tables": ["continent", "country"],
                 },
                 "provenance": {
@@ -738,7 +896,7 @@ def _exp2_checkpoint_metadata(stage: str) -> dict:
                 "current_database_condition": {
                     "T": 2,
                     "N": 1000,
-                    "layers": 12,
+                    "layers": layers,
                     "selected_tables": ["continent", "country"],
                     "source_database_sha256": "a" * 64,
                     "source_database_manifest_sha256": "b" * 64,
@@ -790,12 +948,22 @@ def test_exp2_result_reservation_never_reuses_timestamp(
     ("checkpoint_stage", "evaluation_stage"),
     [("cpt", "eval_cpt"), ("target-sft", "eval_sft")],
 )
+@pytest.mark.parametrize(
+    ("model_name", "layers", "checkpoint_config"),
+    [
+        ("gpt2", 12, {"model_type": "gpt2", "n_layer": 12}),
+        ("qwen3-0.6b-base", 28, {"model_type": "qwen3", "num_hidden_layers": 28}),
+    ],
+)
 def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exp2_config: dict,
     checkpoint_stage: str,
     evaluation_stage: str,
+    model_name: str,
+    layers: int,
+    checkpoint_config: dict,
 ) -> None:
     qa_root = tmp_path / "qa"
     qa_root.mkdir()
@@ -805,10 +973,12 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
     )
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
-    write_json(checkpoint / "config.json", {"model_type": "gpt2", "n_layer": 12})
+    write_json(checkpoint / "config.json", checkpoint_config)
     write_json(
         checkpoint / "training_metadata.json",
-        _exp2_checkpoint_metadata(checkpoint_stage),
+        _exp2_checkpoint_metadata(
+            checkpoint_stage, model=model_name, layers=layers
+        ),
     )
     output_dir = (
         tmp_path
@@ -846,7 +1016,7 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
     monkeypatch.setattr(
         evaluate_script,
         "evaluate_with_local_checkpoint",
-        lambda *_, **__: ([{"id": "example"}], {"model_identity": "gpt2"}),
+        lambda *_, **__: ([{"id": "example"}], {"model_identity": model_name}),
     )
     monkeypatch.setattr(
         evaluate_script,
@@ -862,6 +1032,7 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
             checkpoint=checkpoint,
             split="validation",
             batch_size=None,
+            model=model_name,
             run_name=None,
         ),
         exp2_config,
@@ -882,6 +1053,20 @@ def test_exp2_evaluator_writes_standard_files_to_authenticated_stage(
     )
     assert evaluation_config["checkpoint_stage"] == checkpoint_stage
     assert evaluation_config["evaluation_stage"] == evaluation_stage
+    assert evaluation_config["M"] == model_name
+
+
+def test_exp2_evaluation_rejects_wrong_cli_model_before_inference() -> None:
+    checkpoint_metadata = _exp2_checkpoint_metadata(
+        "cpt", model="qwen3-0.6b-base", layers=28
+    )
+    with pytest.raises(ValueError, match="model identity mismatch"):
+        evaluate_script._authenticate_exp2_checkpoint_condition(
+            checkpoint_metadata=checkpoint_metadata,
+            qa_manifest=_exp2_qa_manifest(),
+            actual_layers=28,
+            expected_model="gpt2",
+        )
 
 
 def _mutate_checkpoint_condition(metadata: dict, field: str) -> None:
@@ -960,6 +1145,7 @@ def test_exp2_evaluation_rejects_checkpoint_qa_condition_mismatch_before_inferen
                 checkpoint=checkpoint,
                 split="validation",
                 batch_size=None,
+                model=None,
                 run_name=None,
             ),
             exp2_config,
@@ -1293,6 +1479,16 @@ def _patch_runner_before_training(
     run_dir.mkdir()
     base_model = tmp_path / "base-model"
     base_model.mkdir()
+    write_json(
+        base_model / "config.json",
+        {
+            "model_type": "gpt2",
+            "n_layer": 12,
+            "n_embd": 768,
+            "n_head": 12,
+            "n_positions": 1024,
+        },
+    )
     reused: list[str] = []
     monkeypatch.setattr(exp2_runner, "_parse_args", lambda: args)
     monkeypatch.setattr(exp2_runner, "_infer_resume_inputs", lambda _: None)

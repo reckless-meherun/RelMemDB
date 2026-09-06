@@ -15,6 +15,7 @@ if str(SRC_DIR) not in sys.path:
 
 from config import DEFAULT_CONFIG_PATH, load_config
 from experiment import (
+    apply_checkpoint_model_config,
     ExperimentCondition,
     load_exp2_dataset_condition,
     resolve_model_checkpoint,
@@ -195,7 +196,6 @@ def main() -> None:
 
 def _run_exp2(args: argparse.Namespace, config: dict) -> None:
     model_name = args.model or config["model"].get("name", "gpt2")
-    config["model"]["name"] = model_name
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     config["_runtime"] = {"run_timestamp": timestamp}
     if args.stage == "cpt":
@@ -212,6 +212,9 @@ def _run_exp2(args: argparse.Namespace, config: dict) -> None:
                 raise ValueError(f"optional {label} assertion does not match the dataset manifest")
         source_checkpoint, native_layers = resolve_model_checkpoint(
             model_name, source_checkpoint=args.source_checkpoint
+        )
+        apply_checkpoint_model_config(
+            config, model_name=model_name, checkpoint=source_checkpoint
         )
         layers = native_layers if args.layers is None else args.layers
         verify_checkpoint_layers(source_checkpoint, layers)
@@ -269,6 +272,9 @@ def _run_exp2(args: argparse.Namespace, config: dict) -> None:
             "Experiment-2 target SFT requires an explicit CPT checkpoint with training_metadata.json"
         )
     _, native_layers = resolve_model_checkpoint(model_name, source_checkpoint=source_checkpoint)
+    apply_checkpoint_model_config(
+        config, model_name=model_name, checkpoint=source_checkpoint
+    )
     layers = native_layers if args.layers is None else args.layers
     verify_checkpoint_layers(source_checkpoint, layers)
     stem = exp2_artifact_stem(

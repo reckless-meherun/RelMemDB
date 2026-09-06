@@ -47,6 +47,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name")
     parser.add_argument("--qa-data-dir", type=Path)
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--model")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     return parser.parse_args()
 
@@ -404,11 +405,12 @@ def _evaluate_exp2(args: argparse.Namespace, config: dict) -> None:
         )
     checkpoint_metadata = read_json(metadata_path)
     evaluation_stage = _exp2_evaluation_stage(checkpoint_metadata)
+    expected_model = args.model or config["model"]["name"]
     condition_provenance = _authenticate_exp2_checkpoint_condition(
         checkpoint_metadata=checkpoint_metadata,
         qa_manifest=root_manifest,
         actual_layers=layer_provenance["actual_layers"],
-        expected_model=config["model"]["name"],
+        expected_model=expected_model,
     )
     qa_records, qa_provenance = load_verified_qa_split(
         qa_root / args.split, split=args.split,
