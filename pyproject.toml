@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",
     "torch>=2.2",
+    "tqdm>=4.66",
     "transformers>=4.51,<5",
 ]
 

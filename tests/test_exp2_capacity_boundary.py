@@ -42,6 +42,7 @@ from data.world import (
 from experiment import read_checkpoint_model_architecture
 from experiment import resolve_model_checkpoint, verify_checkpoint_layers
 from training.cpt import (
+    _create_exp2_cpt_progress_bar,
     _seeded_dataloader_generator,
     build_cpt_training_plan,
     collate_independent_cpt_examples,
@@ -397,6 +398,32 @@ def test_exp2_cpt_shuffle_is_deterministic_but_changes_record_order_each_epoch(
     assert second_epoch == repeated_second
     assert first_epoch != second_epoch
     assert sorted(first_epoch) == sorted(second_epoch) == list(range(len(records)))
+
+
+def test_exp2_cpt_progress_bar_is_epoch_scoped(capsys: pytest.CaptureFixture[str]) -> None:
+    progress = _create_exp2_cpt_progress_bar(
+        {"epochs": 3, "optimizer_steps": 9, "learning_rate": 3e-5}
+    )
+    try:
+        assert progress.total == 3
+        assert progress.unit == "epoch"
+        assert progress.desc == "Exp02 CPT epoch 0/3"
+        assert "optimizer_step=0/9" in progress.postfix
+        assert "loss=n/a" in progress.postfix
+        assert "lr=3.000e-05" in progress.postfix
+        progress.set_description("Exp02 CPT epoch 1/3")
+        progress.set_postfix(
+            optimizer_step="1/9", loss="2.500000", lr="1.000e-05"
+        )
+        progress.update(1)
+        assert progress.n == 1
+        assert progress.desc.startswith("Exp02 CPT epoch 1/3")
+        assert "optimizer_step=1/9" in progress.postfix
+        assert "loss=2.500000" in progress.postfix
+        assert "lr=1.000e-05" in progress.postfix
+    finally:
+        progress.close()
+    capsys.readouterr()
 
 
 def test_exp2_cpt_test_uses_only_seen_facts_and_is_deterministic(

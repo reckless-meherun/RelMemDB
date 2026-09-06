@@ -665,6 +665,24 @@ def _build_adamw_optimizer(
     return optimizer, actually_used, None
 
 
+def _create_exp2_cpt_progress_bar(plan: dict[str, Any]) -> Any:
+    from tqdm.auto import tqdm
+
+    progress = tqdm(
+        total=plan["epochs"],
+        desc=f"Exp02 CPT epoch 0/{plan['epochs']}",
+        unit="epoch",
+        dynamic_ncols=True,
+        leave=True,
+    )
+    progress.set_postfix(
+        optimizer_step=f"0/{plan['optimizer_steps']}",
+        loss="n/a",
+        lr=f"{plan['learning_rate']:.3e}",
+    )
+    return progress
+
+
 def _configure_gradient_checkpointing(model: Any, enabled: bool) -> None:
     if enabled:
         if not hasattr(model, "gradient_checkpointing_enable"):
@@ -944,61 +962,70 @@ def run_cpt_training(
     }.get(plan["precision"])
     scaler = torch.amp.GradScaler("cuda", enabled=plan["precision"] == "fp16")
     optimizer.zero_grad(set_to_none=True)
-    for epoch, micro_batch_in_epoch, batch in _iterate_cpt_batches(
-        loader, plan["epochs"]
-    ):
-        batch = {
-            key: value.to(device, non_blocking=True) for key, value in batch.items()
-        }
-        supervised_tokens = int((batch["labels"] != -100).sum().item())
-        observed_supervised_tokens += supervised_tokens
-        observed_sequences += int(batch["input_ids"].shape[0])
-        is_final_micro_batch = micro_batch_in_epoch == plan["micro_batches_per_epoch"]
-        in_final_partial_accumulation = (
-            final_accumulation_remainder > 0
-            and micro_batch_in_epoch
-            > plan["micro_batches_per_epoch"] - final_accumulation_remainder
-        )
-        accumulation_divisor = (
-            final_accumulation_remainder
-            if in_final_partial_accumulation
-            else accumulation_steps
-        )
-        autocast_context = (
-            torch.autocast(device_type="cuda", dtype=autocast_dtype)
-            if autocast_dtype is not None
-            else nullcontext()
-        )
-        with autocast_context:
-            output = model(**batch)
-            loss = output.loss
-            scaled_loss = loss / accumulation_divisor
-        scaler.scale(scaled_loss).backward()
-        contributing_tokens = int((batch["labels"][:, 1:] != -100).sum().item())
-        detached_loss = float(loss.detach().item())
-        weighted_loss += detached_loss * contributing_tokens
-        loss_token_count += contributing_tokens
-        accumulation_micro_batches += 1
-        accumulation_supervised_tokens += supervised_tokens
-        accumulation_weighted_loss += detached_loss * contributing_tokens
-        accumulation_loss_tokens += contributing_tokens
-        should_step = (
-            micro_batch_in_epoch % accumulation_steps == 0 or is_final_micro_batch
-        )
-        if not should_step:
-            continue
+    progress_bar = _create_exp2_cpt_progress_bar(plan) if is_exp2 else None
+    displayed_epoch = 0
+    try:
+        for epoch, micro_batch_in_epoch, batch in _iterate_cpt_batches(
+            loader, plan["epochs"]
+        ):
+            if progress_bar is not None and epoch != displayed_epoch:
+                progress_bar.set_description(
+                    f"Exp02 CPT epoch {epoch}/{plan['epochs']}"
+                )
+                displayed_epoch = epoch
+            batch = {
+                key: value.to(device, non_blocking=True) for key, value in batch.items()
+            }
+            supervised_tokens = int((batch["labels"] != -100).sum().item())
+            observed_supervised_tokens += supervised_tokens
+            observed_sequences += int(batch["input_ids"].shape[0])
+            is_final_micro_batch = (
+                micro_batch_in_epoch == plan["micro_batches_per_epoch"]
+            )
+            in_final_partial_accumulation = (
+                final_accumulation_remainder > 0
+                and micro_batch_in_epoch
+                > plan["micro_batches_per_epoch"] - final_accumulation_remainder
+            )
+            accumulation_divisor = (
+                final_accumulation_remainder
+                if in_final_partial_accumulation
+                else accumulation_steps
+            )
+            autocast_context = (
+                torch.autocast(device_type="cuda", dtype=autocast_dtype)
+                if autocast_dtype is not None
+                else nullcontext()
+            )
+            with autocast_context:
+                output = model(**batch)
+                loss = output.loss
+                scaled_loss = loss / accumulation_divisor
+            scaler.scale(scaled_loss).backward()
+            contributing_tokens = int((batch["labels"][:, 1:] != -100).sum().item())
+            detached_loss = float(loss.detach().item())
+            weighted_loss += detached_loss * contributing_tokens
+            loss_token_count += contributing_tokens
+            accumulation_micro_batches += 1
+            accumulation_supervised_tokens += supervised_tokens
+            accumulation_weighted_loss += detached_loss * contributing_tokens
+            accumulation_loss_tokens += contributing_tokens
+            should_step = (
+                micro_batch_in_epoch % accumulation_steps == 0 or is_final_micro_batch
+            )
+            if not should_step:
+                continue
 
-        scaler.unscale_(optimizer)
-        gradient_norm = torch.nn.utils.clip_grad_norm_(
-            model.parameters(), plan["max_grad_norm"]
-        )
-        scaler.step(optimizer)
-        scaler.update()
-        scheduler.step()
-        optimizer.zero_grad(set_to_none=True)
-        optimizer_step += 1
-        step_records.append(
-            {
+            scaler.unscale_(optimizer)
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), plan["max_grad_norm"]
+            )
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
+            optimizer_step += 1
+            step_record = {
                 "record_type": "optimizer_step",
                 "step": optimizer_step,
                 "epoch": epoch,
@@ -1010,11 +1037,22 @@ def run_cpt_training(
                 "gradient_norm": float(gradient_norm),
                 "supervised_tokens": accumulation_supervised_tokens,
             }
-        )
-        accumulation_micro_batches = 0
-        accumulation_supervised_tokens = 0
-        accumulation_weighted_loss = 0.0
-        accumulation_loss_tokens = 0
+            step_records.append(step_record)
+            if progress_bar is not None:
+                progress_bar.set_postfix(
+                    optimizer_step=f"{optimizer_step}/{plan['optimizer_steps']}",
+                    loss=f"{step_record['loss']:.6f}",
+                    lr=f"{step_record['learning_rate']:.3e}",
+                )
+                if is_final_micro_batch:
+                    progress_bar.update(1)
+            accumulation_micro_batches = 0
+            accumulation_supervised_tokens = 0
+            accumulation_weighted_loss = 0.0
+            accumulation_loss_tokens = 0
+    finally:
+        if progress_bar is not None:
+            progress_bar.close()
 
     if len(step_records) != plan["optimizer_steps"]:
         raise RuntimeError("CPT optimizer-step accounting is inconsistent")
