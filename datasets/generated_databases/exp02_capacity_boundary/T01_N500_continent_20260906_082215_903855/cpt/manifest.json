@@ -1,0 +1,61 @@
+{
+  "T": 1,
+  "attribute_facts_in_book": 500,
+  "book_copies_per_cpt_epoch": 1,
+  "byte_count": 19209,
+  "character_count": 19209,
+  "cpt_source_text": "book_readable.txt",
+  "experiment_name": "exp02_capacity_boundary",
+  "experimental_schema_column_count": 2,
+  "facts_per_selected_chain": 2,
+  "format_version": 3,
+  "identifier_schema_column_count": 1,
+  "identifiers_in_readable_book": 0,
+  "instance_sentence_count_in_book": 250,
+  "logical_content_sha256": "da194d30b98d6d89bcd6804553133b1f8d755a493f095daff947ed630060743e",
+  "logical_entities_in_book": 250,
+  "logical_fact_coverage_sha256": "d1b9d3220903177c34e61a6f23e50ced261d547920775da010254b0fab56eee5",
+  "logical_facts_in_book": 500,
+  "physical_record_group_count": 1,
+  "physical_record_groups": [
+    {
+      "entity_types": [
+        "continent"
+      ],
+      "group_index": 1,
+      "physical_table": "continent",
+      "row_count": 250,
+      "semantic_positions": [
+        0
+      ]
+    }
+  ],
+  "physical_rows_in_book": 250,
+  "readable_book_byte_count": 19209,
+  "readable_book_character_count": 19209,
+  "readable_book_line_count": 505,
+  "readable_book_sha256": "bf2dd4d41e8e5178ff3c4a3c57d92c44859ca3eb1eb09261841989ee632cabce",
+  "record_organization_sentence_count_in_book": 0,
+  "relation_facts_in_book": 0,
+  "requested_N": 500,
+  "schema_description_sentence_count_in_book": 1,
+  "schema_foreign_key_count_in_book": 0,
+  "schema_intra_table_relation_count_in_book": 0,
+  "schema_relationship_count_in_book": 0,
+  "selected_chain_count": 250,
+  "selected_tables": [
+    "continent"
+  ],
+  "sentence_count": 251,
+  "serialization_order": {
+    "entities": "ascending semantic position within each physical row",
+    "record_groups": "database-manifest position_partition order",
+    "rows": "ascending SQLite rowid within each physical record group"
+  },
+  "serialization_style": "natural_language_db_book_v1",
+  "source_database_manifest_sha256": "560864adcfd17b12224813945e1e3b937d2515366bafdc012f9de89a3d2fe629",
+  "source_database_sha256": "e266a76206d4fcfafa22055d41fcc179fdc0bf876c8e66cae18168dc8901df74",
+  "source_identifier_count": 250,
+  "table_count": 1,
+  "total_schema_column_count": 3
+}
