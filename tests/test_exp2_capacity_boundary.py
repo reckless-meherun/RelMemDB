@@ -12,6 +12,7 @@ import scripts.evaluate as evaluate_script
 import scripts.run_exp02 as exp2_runner
 
 from config import load_config
+from data.cpt_test import generate_exp2_cpt_test, verify_exp2_cpt_test
 from data.materialize import (
     build_exp2_database_manifest,
     materialize_selected_tables_database,
@@ -23,7 +24,12 @@ from data.qa import (
     generate_target_sft_qa,
     load_verified_semantic_chains,
 )
-from data.serialize import database_schema_sha256, serialize_database_cpt
+from data.serialize import (
+    EXP2_CPT_EXAMPLE_METHOD_VERSION,
+    build_selected_cpt_records,
+    database_schema_sha256,
+    serialize_database_cpt,
+)
 from data.world import (
     NATURAL_IDENTIFIER_FIELDS,
     SEMANTIC_ENTITY_SPECS,
@@ -33,7 +39,13 @@ from data.world import (
     validate_selected_tables,
 )
 from experiment import resolve_model_checkpoint, verify_checkpoint_layers
-from training.cpt import build_cpt_training_plan, verify_cpt_artifacts
+from training.cpt import (
+    _seeded_dataloader_generator,
+    build_cpt_training_plan,
+    collate_independent_cpt_examples,
+    tokenize_independent_cpt_records,
+    verify_cpt_artifacts,
+)
 from training.target_sft import build_target_sft_training_plan, load_target_sft_dataset
 from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json, read_text, write_json
@@ -134,8 +146,10 @@ def test_exp2_hidden_fk_support_preserves_schema_but_not_exposure(
     assert "Course Records" not in book
     assert not (bundle / "cpt" / "train.txt").exists()
     cpt_manifest = read_json(bundle / "cpt" / "manifest.json")
-    assert cpt_manifest["cpt_source_text"] == "book_readable.txt"
-    assert cpt_manifest["book_copies_per_cpt_epoch"] == 1
+    assert cpt_manifest["readable_book_artifact"] == "book_readable.txt"
+    assert cpt_manifest["record_passes_per_cpt_epoch"] == 1
+    assert cpt_manifest["cpt_examples_independently_tokenized"] is True
+    assert cpt_manifest["cpt_examples_include_book_context"] is False
     assert "fact_exposure" not in cpt_manifest
     assert "train_text_sha256" not in cpt_manifest
     assert not any(key.endswith("_per_exposure") for key in cpt_manifest)
@@ -266,7 +280,7 @@ def test_exp2_sft_loader_reads_train_only(
     assert provenance["test_split_used"] is False
 
 
-def test_exp2_cpt_authenticates_and_reads_the_single_book_directly(
+def test_exp2_cpt_authenticates_independent_records_and_keeps_book_as_artifact(
     tmp_path: Path, exp2_config: dict
 ) -> None:
     bundle = _bundle(tmp_path, exp2_config, ["continent"], 5)
@@ -280,12 +294,158 @@ def test_exp2_cpt_authenticates_and_reads_the_single_book_directly(
         train_text_path=bundle / "cpt" / "train.txt",
         cpt_manifest_path=bundle / "cpt" / "manifest.json",
     )
-    assert provenance["cpt_source_text"] == "book_readable.txt"
-    assert provenance["cpt_source_path"] == str(
+    assert provenance["readable_book_artifact"] == "book_readable.txt"
+    assert provenance["readable_book_artifact_path"] == str(
         (bundle / "cpt" / "book_readable.txt").resolve()
     )
-    assert provenance["book_copies_per_cpt_epoch"] == 1
+    assert provenance["record_passes_per_cpt_epoch"] == 1
+    assert provenance["cpt_example_count"] == 5
     assert not (bundle / "cpt" / "train.txt").exists()
+
+
+class _Exp2CharacterTokenizer:
+    pad_token_id = 0
+    eos_token_id = 1
+
+    def __init__(self) -> None:
+        self.encoded_texts: list[str] = []
+
+    def encode(self, text: str, *, add_special_tokens: bool) -> list[int]:
+        assert add_special_tokens is False
+        self.encoded_texts.append(text)
+        return [ord(character) + 2 for character in text]
+
+
+def test_exp2_cpt_records_are_isolated_complete_and_independently_tokenized(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    bundle = _bundle(tmp_path, exp2_config, ["continent", "country"], 5)
+    records, metadata = build_selected_cpt_records(
+        bundle / "database.sqlite", read_json(bundle / "manifest.json")
+    )
+    book = read_text(bundle / "cpt" / "book_readable.txt")
+    assert metadata["method_version"] == EXP2_CPT_EXAMPLE_METHOD_VERSION
+    assert metadata["record_count"] == 15
+    assert metadata["logical_fact_count"] == 25
+    assert sum(len(record["covered_fact_sha256"]) for record in records) == 25
+    assert len({record["id"] for record in records}) == len(records)
+    for record in records:
+        assert "\n" not in record["text"]
+        assert record["text"] in book.splitlines()
+        assert "The Academic Database Book" not in record["text"]
+        assert not record["text"].endswith(" Records")
+
+    tokenizer = _Exp2CharacterTokenizer()
+    examples, statistics = tokenize_independent_cpt_records(
+        records, tokenizer, context_length=512
+    )
+    assert tokenizer.encoded_texts == [record["text"] for record in records]
+    assert len(examples) == statistics["sequence_count"] == len(records)
+    assert statistics["eos_token_count"] == len(records)
+    assert statistics["cross_record_attention"] is False
+    assert statistics["global_stream_chunking"] is False
+    plan = build_cpt_training_plan(
+        exp2_config,
+        table_count=2,
+        fact_count=25,
+        sequence_count=len(examples),
+    )
+    assert plan["trained_sequence_count_per_epoch"] == len(records)
+    assert plan["dropped_sequences_per_epoch"] == 0
+    for record, example in zip(records, examples, strict=True):
+        assert example["record_id"] == record["id"]
+        assert example["input_ids"][-1] == tokenizer.eos_token_id
+        assert example["attention_mask"] == [1] * len(example["input_ids"])
+        assert example["labels"] == example["input_ids"]
+
+    batch = collate_independent_cpt_examples(
+        [examples[0], examples[-1]], pad_token_id=tokenizer.pad_token_id
+    )
+    for input_ids, attention_mask, labels in zip(
+        batch["input_ids"].tolist(),
+        batch["attention_mask"].tolist(),
+        batch["labels"].tolist(),
+        strict=True,
+    ):
+        for token_id, attends, label in zip(
+            input_ids, attention_mask, labels, strict=True
+        ):
+            assert label == token_id if attends else label == -100
+
+
+def test_exp2_cpt_shuffle_is_deterministic_but_changes_record_order_each_epoch(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    torch = pytest.importorskip("torch")
+    bundle = _bundle(tmp_path, exp2_config, ["continent"], 10)
+    records, _ = build_selected_cpt_records(
+        bundle / "database.sqlite", read_json(bundle / "manifest.json")
+    )
+
+    def two_epochs() -> tuple[list[int], list[int]]:
+        generator = _seeded_dataloader_generator(
+            torch, exp2_config["experiment"]["seed"]
+        )
+        sampler = torch.utils.data.RandomSampler(records, generator=generator)
+        return list(iter(sampler)), list(iter(sampler))
+
+    first_epoch, second_epoch = two_epochs()
+    repeated_first, repeated_second = two_epochs()
+    assert first_epoch == repeated_first
+    assert second_epoch == repeated_second
+    assert first_epoch != second_epoch
+    assert sorted(first_epoch) == sorted(second_epoch) == list(range(len(records)))
+
+
+def test_exp2_cpt_test_uses_only_seen_facts_and_is_deterministic(
+    tmp_path: Path, exp2_config: dict
+) -> None:
+    all_tables = [spec["entity_type"] for spec in SEMANTIC_ENTITY_SPECS]
+    bundle = _bundle(tmp_path / "dataset", exp2_config, all_tables, 40)
+    first = generate_exp2_cpt_test(
+        exp2_config,
+        training_data_dir=bundle,
+        output_dir=tmp_path / "first" / "cpt_test",
+    )
+    second = generate_exp2_cpt_test(
+        exp2_config,
+        training_data_dir=bundle,
+        output_dir=tmp_path / "second" / "cpt_test",
+    )
+    assert first["probes"] == second["probes"]
+    assert first["manifest"] == second["manifest"]
+    verified = verify_exp2_cpt_test(
+        training_data_dir=bundle, cpt_test_dir=first["output_dir"]
+    )
+    cpt_records, _ = build_selected_cpt_records(
+        bundle / "database.sqlite", read_json(bundle / "manifest.json")
+    )
+    source_by_id = {record["id"]: record for record in cpt_records}
+    assert len(verified["probes"]) == len(cpt_records) * 2
+    assert {probe["source_cpt_record_id"] for probe in verified["probes"]} == set(
+        source_by_id
+    )
+    for probe in verified["probes"]:
+        source = source_by_id[probe["source_cpt_record_id"]]
+        assert probe["source_fact"] == source["text"]
+        assert "\n" not in probe["prompt"]
+        assert "?" not in probe["prompt"]
+        assert "The Academic Database Book" not in probe["prompt"]
+        assert " Records" not in probe["prompt"]
+        if probe["probe_type"] == "canonical_completion":
+            assert source["text"].startswith(
+                probe["prompt"] + probe["gold_answer"]
+            )
+        else:
+            assert probe["prompt"] + probe["gold_answer"] + "." != source["text"]
+
+    canonical = next(
+        probe
+        for probe in verified["probes"]
+        if probe["probe_type"] == "canonical_completion"
+    )
+    assert canonical["prompt"].endswith("is a continent with a ")
+    assert canonical["attribute"] == "climate_band"
 
 
 def test_exp2_exact_epoch_plans_have_no_hidden_exposure_or_dev_selection(
@@ -301,8 +461,9 @@ def test_exp2_exact_epoch_plans_have_no_hidden_exposure_or_dev_selection(
         config, table_count=1, fact_count=10, example_count=5
     )
     assert cpt_plan["requested_cpt_epochs"] == 200
-    assert cpt_plan["requested_book_passes"] == 200
+    assert cpt_plan["requested_record_passes"] == 200
     assert cpt_plan["total_optimizer_steps"] == 200
+    assert "passes_over_serialized_corpus" not in cpt_plan
     assert "effective_fact_exposure" not in cpt_plan
     assert sft_plan["requested_sft_epochs"] == 200
     assert sft_plan["total_optimizer_steps"] == 200
@@ -827,9 +988,10 @@ def test_exp2_config_has_no_fixed_t_or_n_sweeps(exp2_config: dict) -> None:
         exp2_config, table_count=1, fact_count=500, sequence_count=2
     )
     assert cpt_plan["L"] == 12
-    assert cpt_plan["cpt_source_text"] == "book_readable.txt"
-    assert cpt_plan["book_passes_per_epoch"] == 1
-    assert cpt_plan["requested_book_passes"] == cpt_plan["epochs"]
+    assert cpt_plan["independent_record_sequences"] is True
+    assert cpt_plan["cross_record_attention"] is False
+    assert cpt_plan["record_passes_per_epoch"] == 1
+    assert cpt_plan["requested_record_passes"] == cpt_plan["epochs"]
     assert "fact_exposure" not in cpt_plan
     sft_plan = build_target_sft_training_plan(
         exp2_config, table_count=1, fact_count=500, example_count=2
@@ -923,8 +1085,10 @@ def _cached_dataset_bundle(
             "source_database_sha256": hash_file(database),
             "source_database_manifest_sha256": hash_file(manifest_path),
             "readable_book_sha256": hash_file(cpt_dir / "book_readable.txt"),
-            "cpt_source_text": "book_readable.txt",
-            "book_copies_per_cpt_epoch": 1,
+            "readable_book_artifact": "book_readable.txt",
+            "record_passes_per_cpt_epoch": 1,
+            "cpt_examples_independently_tokenized": True,
+            "cpt_examples_include_book_context": False,
             "logical_facts_in_book": fact_count,
         },
     )

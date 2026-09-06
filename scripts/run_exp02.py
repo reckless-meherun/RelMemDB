@@ -596,15 +596,20 @@ def _verify_cpt_checkpoint(
         ("requested_cpt_epochs", requested_epochs),
         ("completed_cpt_epochs", requested_epochs),
         ("final_checkpoint_epoch", requested_epochs),
-        ("completed_book_passes", requested_epochs),
+        ("completed_record_passes", requested_epochs),
     ):
         if metadata.get(key) != value:
             raise ValueError(
                 f"CPT checkpoint {key} mismatch: expected {value!r}, "
                 f"found {metadata.get(key)!r}"
             )
-    if metadata.get("cpt_source_text") != "book_readable.txt":
-        raise ValueError("CPT checkpoint source text must be book_readable.txt")
+    if metadata.get("readable_book_artifact") != "book_readable.txt":
+        raise ValueError("CPT checkpoint must authenticate book_readable.txt")
+    if (
+        metadata.get("independent_record_sequences") is not True
+        or metadata.get("cross_record_attention") is not False
+    ):
+        raise ValueError("CPT checkpoint was not trained on independent records")
 
     checkpoint_tables = _selected_tables_from_checkpoint_metadata(metadata)
     if checkpoint_tables is not None and tuple(checkpoint_tables) != selected_tables:

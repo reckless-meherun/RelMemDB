@@ -10,6 +10,7 @@ from utils.io import read_json, write_text
 
 SERIALIZATION_FORMAT_VERSION = 3
 SERIALIZATION_STYLE = "natural_language_db_book_v1"
+EXP2_CPT_EXAMPLE_METHOD_VERSION = "isolated_declarative_records_v1"
 
 SCHEMA_ENTITY_DESCRIPTIONS = (
     "A continent represents a geographic area and has a name and climate band.",
@@ -617,6 +618,152 @@ def _render_entity_facts(
     return sentences, covered_facts
 
 
+_EXP2_CPT_PROBE_ATTRIBUTE = {
+    "continent": ("climate_band",),
+    "country": ("currency_name", "relation"),
+    "region": ("administrative_type",),
+    "city": ("population_band", "relation"),
+    "campus": ("campus_type",),
+    "school": ("founding_period", "relation"),
+    "department": ("focus_area", "relation"),
+    "subject": ("discipline_group", "relation"),
+    "course": ("delivery_mode", "relation"),
+    "course_offering": ("room_label",),
+    "enrollment": ("enrollment_status",),
+    "student": ("scholarship_status", "relation"),
+}
+
+
+def _held_out_declarative_prompt(
+    *, entity: dict[str, Any], attribute: str, target: dict[str, Any] | None
+) -> str:
+    anchor = entity["natural_anchor"]
+    if attribute == "relation":
+        if target is None:
+            raise RuntimeError("relation CPT record is missing its target")
+        target_type = target["entity_type"].replace("_", " ")
+        return f"{_possessive(anchor)} {target_type} is "
+    return f"{anchor} has {attribute.replace('_', ' ')} "
+
+
+def build_selected_cpt_records(
+    database_path: str | Path,
+    database_manifest: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Build Exp02's independently trainable declarative record sentences."""
+    _, entities_by_position, _ = read_semantic_database(
+        database_path, database_manifest
+    )
+    selected_positions = database_manifest.get("selected_positions")
+    selected_tables = database_manifest.get("selected_tables")
+    if (
+        not isinstance(selected_positions, list)
+        or not selected_positions
+        or not isinstance(selected_tables, list)
+        or selected_tables
+        != [
+            SEMANTIC_ENTITY_SPECS[position]["entity_type"]
+            for position in selected_positions
+        ]
+    ):
+        raise ValueError("Experiment-2 manifest selected-table metadata is invalid")
+
+    records: list[dict[str, Any]] = []
+    covered_fact_hashes: list[str] = []
+    for position in selected_positions:
+        for entity in entities_by_position[position].values():
+            sentences, covered_facts = _render_entity_facts(
+                entity, entities_by_position
+            )
+            if len(sentences) == 1:
+                fact_groups = [covered_facts]
+            else:
+                fact_groups = [covered_facts[:-1], [covered_facts[-1]]]
+            probe_attributes = _EXP2_CPT_PROBE_ATTRIBUTE[entity["entity_type"]]
+            if len(sentences) != len(fact_groups) or len(sentences) != len(
+                probe_attributes
+            ):
+                raise RuntimeError("CPT record sentence/fact mapping is inconsistent")
+            target = (
+                entities_by_position[position - 1][entity["relation_target_id"]]
+                if position > 0
+                else None
+            )
+            for sentence_index, (sentence, fact_group, attribute) in enumerate(
+                zip(sentences, fact_groups, probe_attributes, strict=True)
+            ):
+                if not fact_group:
+                    raise RuntimeError("CPT record has no covered logical facts")
+                if attribute == "relation":
+                    if target is None:
+                        raise RuntimeError("relation CPT record is missing its target")
+                    gold_answer = target["natural_anchor"]
+                else:
+                    gold_answer = str(entity["attributes"][attribute])
+                answer_offset = sentence.rfind(gold_answer)
+                if answer_offset <= 0:
+                    raise RuntimeError(
+                        "CPT probe answer is not recoverable from its source record"
+                    )
+                fact_hashes = [hash_json_object(fact) for fact in fact_group]
+                record_identity = {
+                    "method_version": EXP2_CPT_EXAMPLE_METHOD_VERSION,
+                    "entity_type": entity["entity_type"],
+                    "entity_id": entity["entity_id"],
+                    "sentence_index": sentence_index,
+                    "covered_facts": fact_group,
+                }
+                records.append(
+                    {
+                        "id": f"cpt_record_{hash_json_object(record_identity)[:32]}",
+                        "entity": entity["natural_anchor"],
+                        "entity_type": entity["entity_type"],
+                        "attribute": (
+                            entity["relation_name"]
+                            if attribute == "relation"
+                            else attribute
+                        ),
+                        "text": sentence,
+                        "gold_answer": gold_answer,
+                        "canonical_prompt": sentence[:answer_offset],
+                        "held_out_prompt": _held_out_declarative_prompt(
+                            entity=entity, attribute=attribute, target=target
+                        ),
+                        "covered_fact_sha256": fact_hashes,
+                    }
+                )
+                covered_fact_hashes.extend(fact_hashes)
+
+    expected_facts = []
+    for position in selected_positions:
+        for entity in entities_by_position[position].values():
+            expected_facts.extend(
+                _attribute_fact(entity, field) for field in entity["attributes"]
+            )
+            if position > 0:
+                expected_facts.append(_relation_fact(entity))
+    expected_hashes = [hash_json_object(fact) for fact in expected_facts]
+    if Counter(covered_fact_hashes) != Counter(expected_hashes):
+        raise RuntimeError(
+            "isolated CPT records do not cover every selected database fact exactly once"
+        )
+    training_projection = [
+        {
+            "id": record["id"],
+            "text": record["text"],
+            "covered_fact_sha256": record["covered_fact_sha256"],
+        }
+        for record in records
+    ]
+    return records, {
+        "method_version": EXP2_CPT_EXAMPLE_METHOD_VERSION,
+        "record_count": len(records),
+        "records_sha256": hash_json_object(training_projection),
+        "logical_fact_count": len(expected_hashes),
+        "logical_fact_coverage_sha256": hash_json_object(sorted(expected_hashes)),
+    }
+
+
 def _group_heading(entity_types: list[str]) -> str:
     labels = [entity_type.replace("_", " ").title() for entity_type in entity_types]
     return f"{_human_join(labels)} Records"
@@ -908,6 +1055,17 @@ def serialize_database_cpt(
     for key, expected_value in expected.items():
         if metadata[key] != expected_value:
             raise ValueError(f"readable database book {key} does not match its manifest")
+    cpt_record_metadata = None
+    if is_exp2:
+        _, cpt_record_metadata = build_selected_cpt_records(
+            database_path, database_manifest
+        )
+        if cpt_record_metadata["record_count"] != metadata["instance_sentence_count"]:
+            raise RuntimeError(
+                "isolated CPT record count does not match readable-book sentences"
+            )
+        if cpt_record_metadata["logical_fact_count"] != requested_n:
+            raise RuntimeError("isolated CPT records do not cover exactly N facts")
 
     write_text(readable_book_path, readable_book)
     result = {
@@ -974,6 +1132,7 @@ def serialize_database_cpt(
         "byte_count": len(readable_book.encode("utf-8")),
     }
     if is_exp2:
+        assert cpt_record_metadata is not None
         per_exposure_fields = {
             "logical_facts_per_exposure",
             "attribute_facts_per_exposure",
@@ -991,8 +1150,21 @@ def serialize_database_cpt(
             result.pop(field)
         result.update(
             {
-                "cpt_source_text": "book_readable.txt",
-                "book_copies_per_cpt_epoch": 1,
+                "readable_book_artifact": "book_readable.txt",
+                "cpt_example_method_version": cpt_record_metadata[
+                    "method_version"
+                ],
+                "cpt_example_count": cpt_record_metadata["record_count"],
+                "cpt_examples_sha256": cpt_record_metadata["records_sha256"],
+                "cpt_example_logical_fact_count": cpt_record_metadata[
+                    "logical_fact_count"
+                ],
+                "cpt_example_logical_fact_coverage_sha256": cpt_record_metadata[
+                    "logical_fact_coverage_sha256"
+                ],
+                "cpt_examples_include_book_context": False,
+                "cpt_examples_independently_tokenized": True,
+                "record_passes_per_cpt_epoch": 1,
                 "logical_facts_in_book": metadata["logical_fact_occurrences"],
                 "attribute_facts_in_book": metadata["attribute_fact_occurrences"],
                 "relation_facts_in_book": metadata["relation_fact_occurrences"],

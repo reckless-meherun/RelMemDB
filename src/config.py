@@ -663,7 +663,11 @@ def _validate_exp02_config(config: dict[str, Any]) -> None:
         _require_bool(_required(training, key, "training"), f"training.{key}")
     if training["drop_last"]:
         raise ConfigError(
-            "Experiment-2 training.drop_last must be false so every book token is trained"
+            "Experiment-2 training.drop_last must be false so every CPT record is trained"
+        )
+    if not training["shuffle"]:
+        raise ConfigError(
+            "Experiment-2 training.shuffle must be true for record-level shuffling"
         )
     for key in ("learning_rate", "epsilon", "max_grad_norm"):
         if _require_number(_required(training, key, "training"), f"training.{key}") <= 0:

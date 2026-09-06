@@ -224,15 +224,22 @@ def load_exp2_dataset_condition(training_data_dir: str | Path) -> dict[str, Any]
         raise ValueError("CPT manifest is incompatible with its Experiment-2 dataset bundle")
     if (bundle / "cpt" / "train.txt").exists():
         raise ValueError("Experiment-2 dataset bundle must not contain CPT train.txt")
-    if cpt_manifest.get("cpt_source_text") != "book_readable.txt":
-        raise ValueError("Experiment-2 CPT source text must be book_readable.txt")
+    if cpt_manifest.get("readable_book_artifact") != "book_readable.txt":
+        raise ValueError("Experiment-2 readable-book artifact must be book_readable.txt")
     if cpt_manifest.get("readable_book_sha256") != hash_file(readable_book_path):
         raise ValueError("Experiment-2 readable book hash does not match its manifest")
-    if cpt_manifest.get("book_copies_per_cpt_epoch") != 1:
-        raise ValueError("Experiment-2 CPT must use exactly one book copy per epoch")
+    if cpt_manifest.get("record_passes_per_cpt_epoch") != 1:
+        raise ValueError("Experiment-2 CPT must use one record pass per epoch")
+    if (
+        cpt_manifest.get("cpt_examples_independently_tokenized") is not True
+        or cpt_manifest.get("cpt_examples_include_book_context") is not False
+    ):
+        raise ValueError("Experiment-2 CPT examples must be independent records")
     if cpt_manifest.get("logical_facts_in_book") != manifest.get("requested_N"):
         raise ValueError("Experiment-2 readable-book fact count is inconsistent")
     stale_cpt_fields = {
+        "book_copies_per_cpt_epoch",
+        "cpt_source_text",
         "fact_exposure",
         "readable_book_copy_count_in_train_text",
         "serialized_logical_fact_occurrences",

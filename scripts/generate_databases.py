@@ -205,7 +205,8 @@ def _serialize_condition_cpt(
     if is_exp2:
         print(
             f"cpt: T={table_count}, N={logical_fact_count}, "
-            f"source={readable_book_path.name}, copies_per_epoch=1"
+            f"records={cpt_manifest['cpt_example_count']}, "
+            f"book_artifact={readable_book_path.name}"
         )
     else:
         try:

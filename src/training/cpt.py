@@ -5,10 +5,16 @@ import random
 import time
 from collections.abc import Iterator
 from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from data.serialize import SERIALIZATION_FORMAT_VERSION, SERIALIZATION_STYLE
+from data.serialize import (
+    EXP2_CPT_EXAMPLE_METHOD_VERSION,
+    SERIALIZATION_FORMAT_VERSION,
+    SERIALIZATION_STYLE,
+    build_selected_cpt_records,
+)
 from experiment import configured_model_layers, verify_checkpoint_layers
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
@@ -109,13 +115,49 @@ def verify_cpt_artifacts(
             raise CPTArtifactError("CPT facts-per-selected-chain metadata is inconsistent")
         if cpt_manifest.get("logical_content_sha256") != database_manifest.get("logical_content_sha256"):
             raise CPTArtifactError("CPT logical-content provenance is inconsistent")
-        if cpt_manifest.get("cpt_source_text") != "book_readable.txt":
-            raise CPTArtifactError("Experiment-2 CPT source text must be book_readable.txt")
-        if cpt_manifest.get("book_copies_per_cpt_epoch") != 1:
-            raise CPTArtifactError("Experiment-2 CPT epoch must contain one book copy")
+        if cpt_manifest.get("readable_book_artifact") != "book_readable.txt":
+            raise CPTArtifactError(
+                "Experiment-2 readable-book artifact must be book_readable.txt"
+            )
+        if (
+            cpt_manifest.get("cpt_example_method_version")
+            != EXP2_CPT_EXAMPLE_METHOD_VERSION
+        ):
+            raise CPTArtifactError("Experiment-2 CPT example method is unsupported")
+        if cpt_manifest.get("cpt_examples_include_book_context") is not False:
+            raise CPTArtifactError("Experiment-2 CPT examples must omit book context")
+        if cpt_manifest.get("cpt_examples_independently_tokenized") is not True:
+            raise CPTArtifactError(
+                "Experiment-2 CPT examples must be independently tokenized"
+            )
+        if cpt_manifest.get("record_passes_per_cpt_epoch") != 1:
+            raise CPTArtifactError(
+                "Experiment-2 CPT epoch must contain one pass over all records"
+            )
         if cpt_manifest.get("logical_facts_in_book") != fact_count:
             raise CPTArtifactError("Experiment-2 CPT book fact count is inconsistent")
+        records, record_metadata = build_selected_cpt_records(
+            database_path, database_manifest
+        )
+        del records
+        expected_record_metadata = {
+            "cpt_example_count": record_metadata["record_count"],
+            "cpt_examples_sha256": record_metadata["records_sha256"],
+            "cpt_example_logical_fact_count": record_metadata[
+                "logical_fact_count"
+            ],
+            "cpt_example_logical_fact_coverage_sha256": record_metadata[
+                "logical_fact_coverage_sha256"
+            ],
+        }
+        for field, expected_value in expected_record_metadata.items():
+            if cpt_manifest.get(field) != expected_value:
+                raise CPTArtifactError(
+                    f"Experiment-2 CPT manifest {field} is inconsistent"
+                )
         stale_fields = {
+            "book_copies_per_cpt_epoch",
+            "cpt_source_text",
             "fact_exposure",
             "readable_book_copy_count_in_train_text",
             "serialized_logical_fact_occurrences",
@@ -164,9 +206,12 @@ def verify_cpt_artifacts(
     if is_exp2:
         provenance.update(
             {
-                "cpt_source_text": "book_readable.txt",
-                "cpt_source_path": str(readable_book_path.resolve()),
-                "book_copies_per_cpt_epoch": 1,
+                "readable_book_artifact": "book_readable.txt",
+                "readable_book_artifact_path": str(readable_book_path.resolve()),
+                "cpt_example_method_version": record_metadata["method_version"],
+                "cpt_example_count": record_metadata["record_count"],
+                "cpt_examples_sha256": record_metadata["records_sha256"],
+                "record_passes_per_cpt_epoch": 1,
                 "logical_facts_per_cpt_epoch": fact_count,
             }
         )
@@ -275,6 +320,96 @@ def tokenize_cpt_corpus(
     return chunk_token_ids(
         token_ids, context_length=context_length, pad_token_id=pad_token_id
     )
+
+
+def tokenize_independent_cpt_records(
+    records: list[dict[str, Any]], tokenizer: Any, *, context_length: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Tokenize each Exp02 declarative record as its own EOS-terminated example."""
+    if not records:
+        raise ValueError("independent CPT records must not be empty")
+    if (
+        isinstance(context_length, bool)
+        or not isinstance(context_length, int)
+        or context_length <= 0
+    ):
+        raise ValueError("context_length must be a positive integer")
+    if tokenizer.eos_token_id is None:
+        raise ValueError("tokenizer must define an EOS token")
+    if tokenizer.pad_token_id is None:
+        raise ValueError("tokenizer must define a pad token")
+
+    examples: list[dict[str, Any]] = []
+    record_token_counts: list[int] = []
+    seen_ids: set[str] = set()
+    for record in records:
+        record_id = record.get("id")
+        text = record.get("text")
+        if not isinstance(record_id, str) or not record_id or record_id in seen_ids:
+            raise ValueError("independent CPT record IDs must be unique non-empty text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f"CPT record {record_id} text must be non-empty")
+        seen_ids.add(record_id)
+        token_ids = list(tokenizer.encode(text, add_special_tokens=False))
+        if not token_ids:
+            raise ValueError(f"CPT record {record_id} tokenization is empty")
+        input_ids = [*token_ids, tokenizer.eos_token_id]
+        if len(input_ids) > context_length:
+            raise ValueError(
+                f"CPT record {record_id} has {len(input_ids)} tokens and exceeds "
+                f"context length {context_length}; truncation is forbidden"
+            )
+        examples.append(
+            {
+                "input_ids": input_ids,
+                "attention_mask": [1] * len(input_ids),
+                "labels": list(input_ids),
+                "real_token_count": len(input_ids),
+                "record_id": record_id,
+            }
+        )
+        record_token_counts.append(len(input_ids))
+    total_tokens = sum(record_token_counts)
+    return examples, {
+        "example_construction": EXP2_CPT_EXAMPLE_METHOD_VERSION,
+        "sequence_count": len(examples),
+        "record_count": len(records),
+        "total_tokens": total_tokens,
+        "supervised_tokens": total_tokens,
+        "eos_token_count": len(examples),
+        "minimum_sequence_tokens": min(record_token_counts),
+        "maximum_sequence_tokens": max(record_token_counts),
+        "context_length": context_length,
+        "independently_tokenized": True,
+        "cross_record_attention": False,
+        "global_stream_chunking": False,
+    }
+
+
+def collate_independent_cpt_examples(
+    examples: list[dict[str, Any]], *, pad_token_id: int
+) -> dict[str, Any]:
+    """Right-pad independent CPT records without supervising padding."""
+    if not examples:
+        raise ValueError("cannot collate an empty independent CPT batch")
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("missing required dependency: torch") from exc
+    width = max(len(example["input_ids"]) for example in examples)
+    input_ids: list[list[int]] = []
+    attention_masks: list[list[int]] = []
+    labels: list[list[int]] = []
+    for example in examples:
+        padding = width - len(example["input_ids"])
+        input_ids.append(example["input_ids"] + [pad_token_id] * padding)
+        attention_masks.append(example["attention_mask"] + [0] * padding)
+        labels.append(example["labels"] + [-100] * padding)
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
 
 
 def collate_cpt_examples(
@@ -409,7 +544,11 @@ def build_cpt_training_plan(
     if is_exp2 and drop_last:
         raise ValueError(
             "Experiment-2 training.drop_last must be false so each CPT epoch "
-            "is one complete pass over book_readable.txt"
+            "is one complete pass over all independent records"
+        )
+    if is_exp2 and not shuffle:
+        raise ValueError(
+            "Experiment-2 training.shuffle must be true for record-level shuffling"
         )
 
     if drop_last:
@@ -433,7 +572,6 @@ def build_cpt_training_plan(
         "L": configured_model_layers(config) if layers is None else layers,
         "seed": seed,
         "epochs": epochs,
-        "passes_over_serialized_corpus": epochs,
         "context_length": context_length,
         "batch_size": batch_size,
         "gradient_accumulation_steps": gradient_accumulation_steps,
@@ -468,16 +606,19 @@ def build_cpt_training_plan(
     if is_exp2:
         plan.update(
             {
-                "cpt_source_text": "book_readable.txt",
-                "book_passes_per_epoch": 1,
+                "cpt_example_method_version": EXP2_CPT_EXAMPLE_METHOD_VERSION,
+                "independent_record_sequences": True,
+                "cross_record_attention": False,
+                "record_passes_per_epoch": 1,
                 "requested_cpt_epochs": epochs,
-                "requested_book_passes": epochs,
+                "requested_record_passes": epochs,
             }
         )
     else:
         assert fact_exposure is not None
         plan.update(
             {
+                "passes_over_serialized_corpus": epochs,
                 "fact_exposure": fact_exposure,
                 "effective_fact_exposure": fact_exposure * epochs,
             }
@@ -611,21 +752,43 @@ def run_cpt_training(
     started = time.perf_counter()
     model, tokenizer = _load_model_and_tokenizer(source_checkpoint)
     is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
-    corpus_path = Path(readable_book_path) if is_exp2 else Path(train_text_path)
-    examples, token_statistics = tokenize_cpt_corpus(
-        read_text(corpus_path),
-        tokenizer,
-        context_length=config["training"]["context_length"],
-    )
-    book_token_count = len(
-        tokenizer.encode(read_text(readable_book_path), add_special_tokens=False)
-    )
-    token_statistics["book_token_count"] = book_token_count
     if is_exp2:
-        token_statistics["cpt_source_path"] = str(corpus_path.resolve())
-        token_statistics["cpt_source_text"] = corpus_path.name
-        token_statistics["cpt_source_token_count"] = token_statistics["total_tokens"]
+        database_manifest = read_json(database_manifest_path)
+        cpt_records, record_metadata = build_selected_cpt_records(
+            database_path, database_manifest
+        )
+        if record_metadata["records_sha256"] != provenance["cpt_examples_sha256"]:
+            raise CPTArtifactError(
+                "reconstructed CPT records do not match authenticated provenance"
+            )
+        examples, token_statistics = tokenize_independent_cpt_records(
+            cpt_records,
+            tokenizer,
+            context_length=config["training"]["context_length"],
+        )
+        token_statistics.update(
+            {
+                "cpt_record_manifest_count": record_metadata["record_count"],
+                "cpt_records_sha256": record_metadata["records_sha256"],
+                "logical_fact_count": record_metadata["logical_fact_count"],
+                "readable_book_artifact": "book_readable.txt",
+                "readable_book_artifact_path": str(
+                    Path(readable_book_path).resolve()
+                ),
+                "readable_book_tokenized_as_stream": False,
+            }
+        )
     else:
+        corpus_path = Path(train_text_path)
+        examples, token_statistics = tokenize_cpt_corpus(
+            read_text(corpus_path),
+            tokenizer,
+            context_length=config["training"]["context_length"],
+        )
+        book_token_count = len(
+            tokenizer.encode(read_text(readable_book_path), add_special_tokens=False)
+        )
+        token_statistics["book_token_count"] = book_token_count
         token_statistics["train_token_count"] = token_statistics["total_tokens"]
     plan = build_cpt_training_plan(
         config,
@@ -683,7 +846,14 @@ def run_cpt_training(
         examples,
         batch_size=plan["batch_size"],
         shuffle=plan["shuffle"],
-        collate_fn=collate_cpt_examples,
+        collate_fn=(
+            partial(
+                collate_independent_cpt_examples,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            if is_exp2
+            else collate_cpt_examples
+        ),
         pin_memory=plan["pin_memory"],
         drop_last=plan["drop_last"],
         num_workers=plan["dataloader_workers"],
@@ -743,9 +913,13 @@ def run_cpt_training(
         run_record.update(
             {
                 "requested_cpt_epochs": plan["epochs"],
-                "cpt_source_text": "book_readable.txt",
-                "book_passes_per_epoch": 1,
-                "requested_book_passes": plan["epochs"],
+                "readable_book_artifact": "book_readable.txt",
+                "cpt_example_method_version": EXP2_CPT_EXAMPLE_METHOD_VERSION,
+                "cpt_example_count": token_statistics["record_count"],
+                "independent_record_sequences": True,
+                "cross_record_attention": False,
+                "record_passes_per_epoch": 1,
+                "requested_record_passes": plan["epochs"],
             }
         )
     else:
@@ -756,6 +930,7 @@ def run_cpt_training(
     weighted_loss = 0.0
     loss_token_count = 0
     observed_supervised_tokens = 0
+    observed_sequences = 0
     optimizer_step = 0
     accumulation_micro_batches = 0
     accumulation_supervised_tokens = 0
@@ -777,6 +952,7 @@ def run_cpt_training(
         }
         supervised_tokens = int((batch["labels"] != -100).sum().item())
         observed_supervised_tokens += supervised_tokens
+        observed_sequences += int(batch["input_ids"].shape[0])
         is_final_micro_batch = micro_batch_in_epoch == plan["micro_batches_per_epoch"]
         in_final_partial_accumulation = (
             final_accumulation_remainder > 0
@@ -850,6 +1026,12 @@ def run_cpt_training(
         raise RuntimeError(
             "CPT training did not consume every supervised token once per epoch"
         )
+    if is_exp2 and observed_sequences != token_statistics["sequence_count"] * plan[
+        "epochs"
+    ]:
+        raise RuntimeError(
+            "Experiment-2 CPT did not consume every independent record once per epoch"
+        )
 
     output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     output_checkpoint.mkdir(parents=True, exist_ok=True)
@@ -874,8 +1056,9 @@ def run_cpt_training(
         summary.update(
             {
                 "completed_cpt_epochs": plan["epochs"],
-                "completed_book_passes": plan["epochs"],
+                "completed_record_passes": plan["epochs"],
                 "final_checkpoint_epoch": plan["epochs"],
+                "observed_record_sequences": observed_sequences,
             }
         )
     write_json(output_checkpoint / "training_metadata.json", summary)
