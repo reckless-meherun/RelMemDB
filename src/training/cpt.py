@@ -16,6 +16,10 @@ from data.serialize import (
     build_selected_cpt_records,
 )
 from experiment import configured_model_layers, verify_checkpoint_layers
+from training.checkpoint_retention import (
+    remove_exp2_trained_checkpoints_except,
+    remove_failed_exp2_checkpoint,
+)
 from utils.hashing import hash_file
 from utils.io import read_json, read_text, write_json, write_jsonl, write_yaml
 
@@ -1071,12 +1075,19 @@ def run_cpt_training(
             "Experiment-2 CPT did not consume every independent record once per epoch"
         )
 
+    if is_exp2:
+        remove_exp2_trained_checkpoints_except(retain=[output_checkpoint])
     output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     output_checkpoint.mkdir(parents=True, exist_ok=True)
     _configure_gradient_checkpointing(model, False)
     model.config.use_cache = previous_use_cache
-    model.save_pretrained(output_checkpoint, safe_serialization=True)
-    tokenizer.save_pretrained(output_checkpoint)
+    try:
+        model.save_pretrained(output_checkpoint, safe_serialization=True)
+        tokenizer.save_pretrained(output_checkpoint)
+    except Exception:
+        if is_exp2:
+            remove_failed_exp2_checkpoint(output_checkpoint)
+        raise
     runtime_seconds = time.perf_counter() - started
     summary = {
         "record_type": "summary",
@@ -1099,7 +1110,12 @@ def run_cpt_training(
                 "observed_record_sequences": observed_sequences,
             }
         )
-    write_json(output_checkpoint / "training_metadata.json", summary)
+    try:
+        write_json(output_checkpoint / "training_metadata.json", summary)
+    except Exception:
+        if is_exp2:
+            remove_failed_exp2_checkpoint(output_checkpoint)
+        raise
     write_jsonl(
         train_log_path,
         [{"record_type": "configuration", **run_record}, *step_records, summary],

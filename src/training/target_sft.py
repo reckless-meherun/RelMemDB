@@ -19,6 +19,10 @@ from evaluation.inference import (
 )
 from evaluation.metrics import compute_evaluation_metrics
 from experiment import configured_model_layers, qa_reference_values, verify_checkpoint_layers
+from training.checkpoint_retention import (
+    remove_exp2_trained_checkpoints_except,
+    remove_failed_exp2_checkpoint,
+)
 from training.cpt import enable_full_parameter_training
 from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json, read_jsonl, write_json, write_jsonl, write_yaml
@@ -1065,14 +1069,22 @@ def _save_target_sft_checkpoint(
     tokenizer: Any,
     output_checkpoint: Path,
     previous_use_cache: bool,
+    retain_only_exp2_checkpoint: bool = False,
 ) -> None:
+    if retain_only_exp2_checkpoint:
+        remove_exp2_trained_checkpoints_except(retain=[output_checkpoint])
     output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     output_checkpoint.mkdir(parents=True, exist_ok=True)
     training_use_cache = model.config.use_cache
     try:
         model.config.use_cache = previous_use_cache
-        model.save_pretrained(output_checkpoint, safe_serialization=True)
-        tokenizer.save_pretrained(output_checkpoint)
+        try:
+            model.save_pretrained(output_checkpoint, safe_serialization=True)
+            tokenizer.save_pretrained(output_checkpoint)
+        except Exception:
+            if retain_only_exp2_checkpoint:
+                remove_failed_exp2_checkpoint(output_checkpoint)
+            raise
     finally:
         model.config.use_cache = training_use_cache
 
@@ -1506,6 +1518,7 @@ def run_target_sft_training(
             tokenizer=tokenizer,
             output_checkpoint=output_checkpoint,
             previous_use_cache=previous_use_cache,
+            retain_only_exp2_checkpoint=True,
         )
     else:
         if best_epoch_record is None:
@@ -1571,7 +1584,12 @@ def run_target_sft_training(
                 ),
             }
         )
-    write_json(output_checkpoint / "training_metadata.json", summary)
+    try:
+        write_json(output_checkpoint / "training_metadata.json", summary)
+    except Exception:
+        if is_exp2:
+            remove_failed_exp2_checkpoint(output_checkpoint)
+        raise
     log_records.append(summary)
     write_jsonl(train_log_path, log_records)
     return summary

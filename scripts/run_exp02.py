@@ -48,6 +48,7 @@ from experiment import (
     resolve_model_checkpoint,
     verify_checkpoint_layers,
 )
+from training.checkpoint_retention import remove_exp2_trained_checkpoints_except
 from utils.hashing import hash_file, hash_json_object
 from utils.io import read_json
 
@@ -1158,6 +1159,7 @@ def main() -> None:
                 fact_count=dataset_condition["N"],
                 requested_epochs=resolved_config["target_sft"]["epochs"],
             )
+            remove_exp2_trained_checkpoints_except(retain=[sft_checkpoint])
             _reuse_stage(
                 state=state,
                 state_path=state_path,

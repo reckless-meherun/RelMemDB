@@ -1,5 +1,6 @@
 import argparse
 from copy import deepcopy
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -48,6 +49,10 @@ from training.cpt import (
     collate_independent_cpt_examples,
     tokenize_independent_cpt_records,
     verify_cpt_artifacts,
+)
+from training.checkpoint_retention import (
+    remove_exp2_trained_checkpoints_except,
+    remove_failed_exp2_checkpoint,
 )
 from training.target_sft import build_target_sft_training_plan, load_target_sft_dataset
 from utils.hashing import hash_file, hash_json_object
@@ -424,6 +429,127 @@ def test_exp2_cpt_progress_bar_is_epoch_scoped(capsys: pytest.CaptureFixture[str
     finally:
         progress.close()
     capsys.readouterr()
+
+
+def _exp2_checkpoint(root: Path, name: str, stage: str) -> Path:
+    checkpoint = root / name
+    checkpoint.mkdir(parents=True)
+    write_json(
+        checkpoint / "training_metadata.json",
+        {"experiment": "exp02_capacity_boundary", "stage": stage},
+    )
+    return checkpoint
+
+
+def test_exp2_checkpoint_retention_keeps_only_requested_checkpoint(
+    tmp_path: Path,
+) -> None:
+    trained = tmp_path / "trained_models"
+    first_cpt = _exp2_checkpoint(
+        trained, "qwen3-0-6b-base_exp02_T01_N100_L28_20260906_100000_000001", "cpt"
+    )
+    first_sft = _exp2_checkpoint(
+        trained,
+        "qwen3-0-6b-base_exp02_T01_N100_L28_20260906_100100_000001_sft",
+        "target-sft",
+    )
+    retained_cpt = _exp2_checkpoint(
+        trained, "qwen3-0-6b-base_exp02_T01_N500_L28_20260906_100200_000001", "cpt"
+    )
+    non_exp2 = trained / "gpt2_cpt_t12_n10k_l12_e20"
+    non_exp2.mkdir()
+
+    removed = remove_exp2_trained_checkpoints_except(
+        retain=[retained_cpt], trained_models_dir=trained
+    )
+    assert removed == [first_cpt, first_sft]
+    assert not first_cpt.exists()
+    assert not first_sft.exists()
+    assert retained_cpt.is_dir()
+    assert non_exp2.is_dir()
+    assert sorted(path.name for path in trained.iterdir() if "_exp02_" in path.name) == [
+        retained_cpt.name
+    ]
+
+    retained_sft = _exp2_checkpoint(
+        trained,
+        "qwen3-0-6b-base_exp02_T01_N500_L28_20260906_100300_000001_sft",
+        "target-sft",
+    )
+    removed = remove_exp2_trained_checkpoints_except(
+        retain=[retained_sft], trained_models_dir=trained
+    )
+    assert removed == [retained_cpt]
+    assert not retained_cpt.exists()
+    assert retained_sft.is_dir()
+    assert non_exp2.is_dir()
+    assert sorted(path.name for path in trained.iterdir() if "_exp02_" in path.name) == [
+        retained_sft.name
+    ]
+
+
+def test_exp2_failed_checkpoint_cleanup_removes_partial_exp2_directory(
+    tmp_path: Path,
+) -> None:
+    trained = tmp_path / "trained_models"
+    failed = trained / "qwen3-0-6b-base_exp02_T01_N100_L28_20260906_100000_000001"
+    failed.mkdir(parents=True)
+    write_json(failed / "config.json", {"partial": True})
+
+    assert remove_failed_exp2_checkpoint(failed, trained_models_dir=trained) is True
+    assert not failed.exists()
+
+
+def test_exp2_sft_checkpoint_save_retains_cpt_until_final_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import training.target_sft as target_sft_module
+
+    cpt_checkpoint = tmp_path / "qwen3-0-6b-base_exp02_T01_N100_L28_20260906_100000_000001"
+    cpt_checkpoint.mkdir()
+    output_checkpoint = (
+        tmp_path
+        / "qwen3-0-6b-base_exp02_T01_N100_L28_20260906_100100_000001_sft"
+    )
+    events: list[tuple[str, bool]] = []
+
+    def cleanup(*, retain):
+        events.append(("cleanup", cpt_checkpoint.exists()))
+        shutil.rmtree(cpt_checkpoint)
+        return [cpt_checkpoint]
+
+    class FakeConfig:
+        use_cache = False
+
+    class FakeModel:
+        config = FakeConfig()
+
+        def save_pretrained(self, path, *, safe_serialization):
+            events.append(("model_save", cpt_checkpoint.exists()))
+            Path(path).mkdir(parents=True, exist_ok=True)
+            write_json(Path(path) / "config.json", {"model_type": "qwen3"})
+
+    class FakeTokenizer:
+        def save_pretrained(self, path):
+            events.append(("tokenizer_save", cpt_checkpoint.exists()))
+            write_json(Path(path) / "tokenizer_config.json", {})
+
+    monkeypatch.setattr(
+        target_sft_module, "remove_exp2_trained_checkpoints_except", cleanup
+    )
+    target_sft_module._save_target_sft_checkpoint(
+        model=FakeModel(),
+        tokenizer=FakeTokenizer(),
+        output_checkpoint=output_checkpoint,
+        previous_use_cache=True,
+        retain_only_exp2_checkpoint=True,
+    )
+    assert events == [
+        ("cleanup", True),
+        ("model_save", False),
+        ("tokenizer_save", False),
+    ]
+    assert output_checkpoint.is_dir()
 
 
 def test_exp2_cpt_test_uses_only_seen_facts_and_is_deterministic(
@@ -1667,3 +1793,58 @@ def test_exp2_runner_explicit_dataset_and_qa_still_bypass_cache_search(
     with pytest.raises(_StopExp2Wrapper):
         exp2_runner.main()
     assert reused[:2] == ["generate_dataset", "generate_qa"]
+
+
+def test_exp2_runner_reused_sft_checkpoint_triggers_retention_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exp2_config: dict
+) -> None:
+    dataset_path = tmp_path / "dataset"
+    qa_path = tmp_path / "qa"
+    cpt_checkpoint = tmp_path / "cpt"
+    sft_checkpoint = tmp_path / "sft"
+    for checkpoint in (cpt_checkpoint, sft_checkpoint):
+        checkpoint.mkdir()
+        write_json(
+            checkpoint / "config.json",
+            {
+                "model_type": "gpt2",
+                "n_layer": 12,
+                "n_embd": 768,
+                "n_head": 12,
+                "n_positions": 1024,
+            },
+        )
+    args = _runner_args(
+        dataset_path=dataset_path,
+        qa_path=qa_path,
+        cpt_checkpoint=cpt_checkpoint,
+        sft_checkpoint=sft_checkpoint,
+    )
+    reused, _ = _patch_runner_before_training(
+        monkeypatch, tmp_path, exp2_config, args
+    )
+    condition = {"bundle": dataset_path.resolve(), "T": 1, "N": 500}
+    qa = {
+        "root": qa_path.resolve(),
+        "sft_data_dir": qa_path.resolve() / "target_sft",
+    }
+    cleanup_retain: list[Path] = []
+    monkeypatch.setattr(exp2_runner, "_verify_dataset_bundle", lambda *_, **__: condition)
+    monkeypatch.setattr(exp2_runner, "_verify_qa_bundle", lambda *_, **__: qa)
+    monkeypatch.setattr(exp2_runner, "_verify_cpt_checkpoint", lambda *_, **__: {})
+    monkeypatch.setattr(exp2_runner, "_verify_sft_checkpoint", lambda *_, **__: {})
+    monkeypatch.setattr(
+        exp2_runner,
+        "remove_exp2_trained_checkpoints_except",
+        lambda retain: cleanup_retain.extend(Path(path).resolve() for path in retain),
+    )
+
+    def execute(**kwargs):
+        if kwargs["stage"] in {"eval_cpt_validation", "eval_sft_validation"}:
+            return tmp_path / kwargs["stage"]
+        raise _StopExp2Wrapper
+
+    monkeypatch.setattr(exp2_runner, "_execute_stage", execute)
+    exp2_runner.main()
+    assert cleanup_retain == [sft_checkpoint.resolve()]
+    assert reused[:3] == ["generate_dataset", "cpt", "generate_qa"]
