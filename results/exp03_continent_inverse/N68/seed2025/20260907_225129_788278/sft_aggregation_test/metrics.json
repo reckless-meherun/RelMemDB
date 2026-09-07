@@ -1,7 +1,7 @@
 {
   "by_hop": {
     "H0": {
-      "count": 68,
+      "count": 17,
       "normalized_exact_match_accuracy": 0.0,
       "normalized_exact_match_correct": 0,
       "strict_exact_match_accuracy": 0.0,
@@ -30,17 +30,13 @@
     }
   },
   "by_target_field": {
-    "climate_band": {
-      "count": 68,
+    "continent_name": {
+      "count": 17,
       "normalized_exact_match_accuracy": 0.0,
       "normalized_exact_match_correct": 0,
       "strict_exact_match_accuracy": 0.0,
       "strict_exact_match_correct": 0
     }
-  },
-  "completion_prefix_match": {
-    "accuracy": 0.0,
-    "correct": 0
   },
   "conditional_relational_accuracy": {
     "H1": {
@@ -70,7 +66,7 @@
   },
   "h0_by_fact_type": {
     "attribute": {
-      "count": 68,
+      "count": 17,
       "normalized_exact_match_accuracy": 0.0,
       "normalized_exact_match_correct": 0,
       "strict_exact_match_accuracy": 0.0,
@@ -86,17 +82,17 @@
   },
   "majority_gold_answer_baseline": {
     "by_target_field": {
-      "climate_band": {
+      "continent_name": {
         "accuracy": 0.058823529411764705,
-        "correct_count": 4,
-        "count": 68,
-        "majority_gold_answer": "Cold Desert"
+        "correct_count": 1,
+        "count": 17,
+        "majority_gold_answer": "Central Grand Pine Shores, Lower Emerald Elm Coast"
       }
     },
     "macro_accuracy": 0.058823529411764705
   },
   "overall": {
-    "count": 68,
+    "count": 17,
     "normalized_exact_match_accuracy": 0.0,
     "normalized_exact_match_correct": 0,
     "strict_exact_match_accuracy": 0.0,
@@ -106,5 +102,9 @@
   "target_field_macro_average": {
     "normalized_exact_match_accuracy": 0.0,
     "strict_exact_match_accuracy": 0.0
+  },
+  "unordered_exact_match": {
+    "unordered_normalized_exact_match_accuracy": 0.0,
+    "unordered_normalized_exact_match_correct": 0
   }
 }

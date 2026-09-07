@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from config import load_config
+from data.cpt_test import CPT_TEST_PROBE_TYPES
 from data.exp3 import (
     CLIMATE_BANDS,
     build_exp3_aggregation_records,
@@ -157,6 +158,14 @@ def test_exp3_sft_and_inverse_aggregation_qa(
     assert cpt_test["manifest"]["source_cpt_logical_fact_count"] == 10
     assert len(cpt_test["probes"]) == 10
     assert all("?" not in probe["prompt"] for probe in cpt_test["probes"])
+    source_counts = Counter(
+        probe["source_cpt_record_id"] for probe in cpt_test["probes"]
+    )
+    probe_type_counts = Counter(probe["probe_type"] for probe in cpt_test["probes"])
+    assert set(probe_type_counts) == set(CPT_TEST_PROBE_TYPES)
+    assert len(cpt_test["probes"]) == 2 * len(source_counts)
+    assert set(source_counts.values()) == {2}
+    assert len(set(probe_type_counts.values())) == 1
 
 
 @pytest.mark.parametrize(
@@ -177,7 +186,7 @@ def test_exp3_unordered_em_uses_multiset_semantics(
     )
 
 
-def test_exp3_cpt_test_uses_raw_declarative_completion_prefixes(
+def test_exp3_cpt_test_uses_raw_prompts_and_reports_em_by_probe_type(
     tmp_path: Path, exp3_config: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dataset_dir = tmp_path / "dataset"
@@ -198,8 +207,8 @@ def test_exp3_cpt_test_uses_raw_declarative_completion_prefixes(
         return [
             score_prediction(
                 record,
-                f" {record['gold_answer']} climate band.",
-                f"{record['gold_answer']} climate band.",
+                record["gold_answer"],
+                record["gold_answer"],
             )
             for record in records
         ], {"model_identity": "fake", "tokenizer_identity": "fake"}
@@ -216,7 +225,16 @@ def test_exp3_cpt_test_uses_raw_declarative_completion_prefixes(
     assert seen_prompts == [probe["prompt"] for probe in qa["cpt_test"]["probes"]]
     assert all("Question:" not in prompt and "?" not in prompt for prompt in seen_prompts)
     metrics = read_json(output_dir / "metrics.json")
-    assert metrics["completion_prefix_match"]["accuracy"] == 1.0
+    assert metrics["overall"]["count"] == 2
+    assert set(metrics["by_probe_type"]) == set(CPT_TEST_PROBE_TYPES)
+    for probe_type in CPT_TEST_PROBE_TYPES:
+        assert metrics["by_probe_type"][probe_type] == {
+            "count": 1,
+            "strict_exact_match_correct": 1,
+            "strict_exact_match_accuracy": 1.0,
+            "normalized_exact_match_correct": 1,
+            "normalized_exact_match_accuracy": 1.0,
+        }
 
 
 def test_exp3_best_checkpoint_replaces_only_on_strict_improvement(

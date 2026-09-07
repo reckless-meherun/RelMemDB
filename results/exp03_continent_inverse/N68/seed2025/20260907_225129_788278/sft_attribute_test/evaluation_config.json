@@ -1,0 +1,36 @@
+{
+  "L": 12,
+  "N": 68,
+  "T": 1,
+  "batch_size": 32,
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278_sft",
+  "checkpoint_training_metadata_sha256": "a5d7f147344a65ca667b95003d2363a39e43459bc9a9a809506c0eb021803efd",
+  "context_length": 256,
+  "decoding": {
+    "do_sample": false,
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "evaluation_stage": "eval_sft_attribute_test",
+  "experiment_name": "exp03_continent_inverse",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278_sft",
+  "primary_metric": "normalized_exact_match",
+  "qa_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/qa/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
+  "qa_input_hashes": {
+    "H0": "d790e191e5eb0d22f41ad5dd3a99c7deeb17b38bfb2916273a947dfb124c1a8d",
+    "H1": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H2": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H3": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "qa_manifest_sha256": "8def5ef6d67cf4320084540e2a0d27f4f1cae27ca35605ede7dc2a85a85088f5",
+  "qa_record_count": 34,
+  "qa_split_manifest_sha256": "54944cad32dc7f70d7f1dd3beecf888fb119bfa5e16f429bdda450ff4fbae3a1",
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "split": "test",
+  "test_dataset": "attribute_test",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278_sft"
+}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import copy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from config import EXP03_NAME, load_config, validate_config
+from data.cpt_test import CPT_TEST_PROBE_TYPES
 from data.exp3 import (
     generate_exp3_qa,
     materialize_exp3_dataset,
@@ -35,7 +37,6 @@ from experiment import (
 )
 from training.checkpoint_retention import retain_best_exp3_checkpoint
 from training.cpt import run_cpt_training
-from training.relational_qa import answer_prefix_match
 from training.target_sft import run_target_sft_training
 from utils.hashing import hash_file
 from utils.io import write_json, write_jsonl, write_yaml
@@ -257,6 +258,7 @@ def _evaluate_cpt_test(
     layers: int,
 ) -> Path:
     probes = qa["cpt_test"]["probes"]
+    cpt_test_manifest = qa["cpt_test"]["manifest"]
     records = [
         {
             **probe,
@@ -279,19 +281,31 @@ def _evaluate_cpt_test(
         prompt_formatter=lambda prompt: prompt,
     )
     metrics = compute_evaluation_metrics(predictions)
-    prefix_correct = 0
-    for prediction in predictions:
-        matched = answer_prefix_match(
-            prediction["raw_generation"], prediction["gold_answer"]
+    probe_counts = Counter(
+        prediction.get("probe_type") for prediction in predictions
+    )
+    source_record_count = cpt_test_manifest["source_cpt_record_count"]
+    if set(probe_counts) != set(CPT_TEST_PROBE_TYPES) or any(
+        probe_counts[probe_type] != source_record_count
+        for probe_type in CPT_TEST_PROBE_TYPES
+    ):
+        raise RuntimeError(
+            "CPT-test predictions do not contain one probe of each type per "
+            "source record"
         )
-        prediction["completion_prefix_match"] = matched
-        prefix_correct += matched
-    metrics["completion_prefix_match"] = {
-        "correct": prefix_correct,
-        "accuracy": prefix_correct / len(predictions),
+    if len(predictions) != len(CPT_TEST_PROBE_TYPES) * source_record_count:
+        raise RuntimeError("CPT-test prediction count is inconsistent")
+    metrics["by_probe_type"] = {
+        probe_type: compute_evaluation_metrics(
+            [
+                prediction
+                for prediction in predictions
+                if prediction["probe_type"] == probe_type
+            ]
+        )["overall"]
+        for probe_type in CPT_TEST_PROBE_TYPES
     }
     output_dir.mkdir(parents=True)
-    cpt_test_manifest = qa["cpt_test"]["manifest"]
     metadata_path = checkpoint / "training_metadata.json"
     write_jsonl(output_dir / "predictions.jsonl", predictions)
     write_json(output_dir / "metrics.json", metrics)
@@ -322,7 +336,7 @@ def _evaluate_cpt_test(
             "context_length": evaluation["context_length"],
             "max_new_tokens": evaluation["max_new_tokens"],
             "batch_size": evaluation["batch_size"],
-            "primary_metric": "completion_prefix_match",
+            "primary_metric": "normalized_exact_match",
             **model_identity,
         },
     )

@@ -20,13 +20,15 @@ table. Each row contributes two semantic facts, so `N` must be even. The fixed
 From the repository root, run:
 
 ```bash
+cd /home/hpc4090/meherun/relmemdb
+
 python3 scripts/run_exp03.py \
-  --fact-count 10 \
+  --fact-count 68 \
   --model gpt2 \
   --layers 12 \
   --base-model models/base_models/gpt2 \
-  --cpt-epochs 20 \
-  --sft-epochs 10
+  --cpt-epochs 200 \
+  --sft-epochs 200
 ```
 
 The runner reuses authenticated Exp03 dataset/QA artifacts for the same `N`

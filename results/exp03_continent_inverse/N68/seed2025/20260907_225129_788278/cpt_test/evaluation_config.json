@@ -3,8 +3,8 @@
   "N": 68,
   "T": 1,
   "batch_size": 32,
-  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520",
-  "checkpoint_training_metadata_sha256": "e28b2bbd5f473857e30b937b8ef2c1289a862c08a8e3030c2df3bfe200a06f07",
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278",
+  "checkpoint_training_metadata_sha256": "1c7cd25b2c50dadf25be0458a56615db061e746c3054c0d0d0a26194e7f88b7a",
   "context_length": 256,
   "cpt_test_manifest_sha256": "4b54671dec80c52dbca1db0236a6ac278ddb5001498fde0a8053d964a4519e38",
   "cpt_test_method_version": "canonical_and_heldout_declarative_completion_v1",
@@ -18,14 +18,14 @@
   "evaluation_stage": "eval_cpt_test",
   "experiment_name": "exp03_continent_inverse",
   "max_new_tokens": 64,
-  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520",
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278",
   "natural_language_questions": false,
-  "primary_metric": "completion_prefix_match",
+  "primary_metric": "normalized_exact_match",
   "prompt_format": "raw_declarative_prefix",
   "seed": 2025,
   "selected_tables": [
     "continent"
   ],
   "test_dataset": "cpt_test",
-  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520"
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_225129_788278"
 }
