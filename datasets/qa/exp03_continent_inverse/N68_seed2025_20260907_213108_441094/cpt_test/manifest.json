@@ -1,0 +1,32 @@
+{
+  "N": 68,
+  "T": 1,
+  "book_context_in_prompts": false,
+  "deterministic_generation": true,
+  "experiment_name": "exp03_continent_inverse",
+  "format_version": 1,
+  "method_version": "canonical_and_heldout_declarative_completion_v1",
+  "natural_language_questions": false,
+  "probe_count": 68,
+  "probe_counts": {
+    "canonical_completion": 34,
+    "heldout_declarative_completion": 34
+  },
+  "probe_source_record_ids_sha256": "5ab793140fac0917c43e2cfa362179d1efb6d6a1057496fa46c3791a61c4f87a",
+  "probes_sha256": "3338e97b198149f61468c5bed0057bfd3ca9021d1c13586f9a40b5b324b7dac6",
+  "same_underlying_facts_as_cpt": true,
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "source_cpt_example_method_version": "isolated_declarative_records_v1",
+  "source_cpt_logical_fact_count": 68,
+  "source_cpt_logical_fact_coverage_sha256": "0b56ef1d56f46ed37cbac2103503e816539087c5c57d93e5314d79fce0176889",
+  "source_cpt_manifest_sha256": "35c06957e3db35b38d94f1973884656567ca5928d2de273bae5f3cab831bd216",
+  "source_cpt_record_count": 34,
+  "source_cpt_records_sha256": "f8245f6dd394655bd71dfb7b63ae2d9e265d74a713b82bb318d333bd9b757d59",
+  "source_database_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
+  "source_readable_book_sha256": "e88522d9d2b60905ab7274f8cdef3cea91bf9b693fac4a16afdb8f2d2b68e702",
+  "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094"
+}

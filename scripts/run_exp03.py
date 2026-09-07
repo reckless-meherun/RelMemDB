@@ -35,6 +35,7 @@ from experiment import (
 )
 from training.checkpoint_retention import retain_best_exp3_checkpoint
 from training.cpt import run_cpt_training
+from training.relational_qa import answer_prefix_match
 from training.target_sft import run_target_sft_training
 from utils.hashing import hash_file
 from utils.io import write_json, write_jsonl, write_yaml
@@ -183,17 +184,19 @@ def _evaluate(
     *,
     checkpoint: Path,
     qa_root: Path,
-    split: str,
+    dataset_name: str,
     output_dir: Path,
     stage: str,
     fact_count: int,
     layers: int,
+    include_unordered: bool = False,
 ) -> tuple[dict[str, Any], Path]:
     records, provenance = load_verified_qa_split(
-        qa_root / split,
-        split=split,
+        qa_root / dataset_name,
+        split="test",
         expected_table_count=1,
         expected_fact_count=fact_count,
+        manifest_hash_key=f"{dataset_name}_manifest_sha256",
     )
     evaluation = config["evaluation"]
     predictions, model_identity = evaluate_with_local_checkpoint(
@@ -204,9 +207,10 @@ def _evaluate(
         max_new_tokens=evaluation["max_new_tokens"],
     )
     metrics = compute_evaluation_metrics(predictions)
-    metrics["unordered_exact_match"] = compute_unordered_exact_match_metrics(
-        predictions
-    )
+    if include_unordered:
+        metrics["unordered_exact_match"] = compute_unordered_exact_match_metrics(
+            predictions
+        )
     output_dir.mkdir(parents=True)
     metadata_path = checkpoint / "training_metadata.json"
     evaluation_config = {
@@ -217,7 +221,8 @@ def _evaluate(
         "L": layers,
         "seed": config["experiment"]["seed"],
         "selected_tables": ["continent"],
-        "split": split,
+        "split": "test",
+        "test_dataset": dataset_name,
         "qa_data_dir": str(qa_root),
         "qa_record_count": len(records),
         "qa_manifest_sha256": provenance["qa_manifest_sha256"],
@@ -232,13 +237,96 @@ def _evaluate(
         "max_new_tokens": evaluation["max_new_tokens"],
         "batch_size": evaluation["batch_size"],
         "primary_metric": "normalized_exact_match",
-        "additional_metric": "unordered_normalized_exact_match",
         **model_identity,
     }
+    if include_unordered:
+        evaluation_config["additional_metric"] = "unordered_normalized_exact_match"
     write_jsonl(output_dir / "predictions.jsonl", predictions)
     write_json(output_dir / "metrics.json", metrics)
     write_json(output_dir / "evaluation_config.json", evaluation_config)
     return metrics, output_dir
+
+
+def _evaluate_cpt_test(
+    config: dict[str, Any],
+    *,
+    checkpoint: Path,
+    qa: dict[str, Any],
+    output_dir: Path,
+    fact_count: int,
+    layers: int,
+) -> Path:
+    probes = qa["cpt_test"]["probes"]
+    records = [
+        {
+            **probe,
+            "question": probe["prompt"],
+            "hop": 0,
+            "fact_type": "attribute",
+            "source_entity_type": "continent",
+            "target_entity_type": "continent",
+            "target_field": probe["attribute"],
+        }
+        for probe in probes
+    ]
+    evaluation = config["evaluation"]
+    predictions, model_identity = evaluate_with_local_checkpoint(
+        records,
+        checkpoint=checkpoint,
+        batch_size=evaluation["batch_size"],
+        context_length=evaluation["context_length"],
+        max_new_tokens=evaluation["max_new_tokens"],
+        prompt_formatter=lambda prompt: prompt,
+    )
+    metrics = compute_evaluation_metrics(predictions)
+    prefix_correct = 0
+    for prediction in predictions:
+        matched = answer_prefix_match(
+            prediction["raw_generation"], prediction["gold_answer"]
+        )
+        prediction["completion_prefix_match"] = matched
+        prefix_correct += matched
+    metrics["completion_prefix_match"] = {
+        "correct": prefix_correct,
+        "accuracy": prefix_correct / len(predictions),
+    }
+    output_dir.mkdir(parents=True)
+    cpt_test_manifest = qa["cpt_test"]["manifest"]
+    metadata_path = checkpoint / "training_metadata.json"
+    write_jsonl(output_dir / "predictions.jsonl", predictions)
+    write_json(output_dir / "metrics.json", metrics)
+    write_json(
+        output_dir / "evaluation_config.json",
+        {
+            "experiment_name": EXP03_NAME,
+            "evaluation_stage": "eval_cpt_test",
+            "T": 1,
+            "N": fact_count,
+            "L": layers,
+            "seed": config["experiment"]["seed"],
+            "selected_tables": ["continent"],
+            "test_dataset": "cpt_test",
+            "cpt_test_method_version": cpt_test_manifest["method_version"],
+            "cpt_test_manifest_sha256": hash_file(
+                qa["root"] / "cpt_test" / "manifest.json"
+            ),
+            "cpt_test_probes_sha256": cpt_test_manifest["probes_sha256"],
+            "cpt_test_probe_count": len(records),
+            "checkpoint_path": str(checkpoint),
+            "checkpoint_training_metadata_sha256": (
+                hash_file(metadata_path) if metadata_path.is_file() else None
+            ),
+            "prompt_format": "raw_declarative_prefix",
+            "natural_language_questions": False,
+            "decoding": {"strategy": "greedy", "do_sample": False, "temperature": None},
+            "context_length": evaluation["context_length"],
+            "max_new_tokens": evaluation["max_new_tokens"],
+            "batch_size": evaluation["batch_size"],
+            "primary_metric": "completion_prefix_match",
+            **model_identity,
+        },
+    )
+    return output_dir
 
 
 def main() -> None:
@@ -309,17 +397,15 @@ def main() -> None:
         state["cpt_checkpoint_path"] = str(cpt_checkpoint)
 
         condition_results = RESULT_ROOT / f"N{args.fact_count}" / f"seed{seed}" / timestamp
-        _, cpt_validation = _evaluate(
+        cpt_test_result = _evaluate_cpt_test(
             config,
             checkpoint=cpt_checkpoint,
-            qa_root=qa["root"],
-            split="validation",
-            output_dir=condition_results / "cpt_validation",
-            stage="eval_cpt",
+            qa=qa,
+            output_dir=condition_results / "cpt_test",
             fact_count=args.fact_count,
             layers=layers,
         )
-        state["cpt_validation_result_path"] = str(cpt_validation)
+        state["cpt_test_result_path"] = str(cpt_test_result)
         write_json(state_path, state)
 
         sft_checkpoint = TRAINED_MODELS_ROOT / f"{stem}_sft"
@@ -338,27 +424,36 @@ def main() -> None:
             raise RuntimeError("SFT checkpoint has the wrong experiment identity")
         state["sft_checkpoint_path"] = str(sft_checkpoint)
 
-        _, sft_validation = _evaluate(
+        attribute_metrics, attribute_test_result = _evaluate(
             config,
             checkpoint=sft_checkpoint,
             qa_root=qa["root"],
-            split="validation",
-            output_dir=condition_results / "sft_validation",
-            stage="eval_sft",
+            dataset_name="attribute_test",
+            output_dir=condition_results / "sft_attribute_test",
+            stage="eval_sft_attribute_test",
             fact_count=args.fact_count,
             layers=layers,
         )
-        test_metrics, sft_test = _evaluate(
+        aggregation_metrics, aggregation_test_result = _evaluate(
             config,
             checkpoint=sft_checkpoint,
             qa_root=qa["root"],
-            split="test",
-            output_dir=condition_results / "sft_test",
-            stage="eval_sft",
+            dataset_name="aggregation_test",
+            output_dir=condition_results / "sft_aggregation_test",
+            stage="eval_sft_aggregation_test",
             fact_count=args.fact_count,
             layers=layers,
+            include_unordered=True,
         )
-        em = test_metrics["overall"]["normalized_exact_match_accuracy"]
+        attribute_em = attribute_metrics["overall"][
+            "normalized_exact_match_accuracy"
+        ]
+        aggregation_em = aggregation_metrics["overall"][
+            "normalized_exact_match_accuracy"
+        ]
+        aggregation_unordered_em = aggregation_metrics["unordered_exact_match"][
+            "unordered_normalized_exact_match_accuracy"
+        ]
         best_checkpoint = (
             TRAINED_MODELS_ROOT
             / "exp03_best"
@@ -374,24 +469,28 @@ def main() -> None:
             "epochs": config["target_sft"]["epochs"],
             "cpt_epochs": config["training"]["cpt_epochs"],
             "seed": seed,
-            "EM": em,
+            "EM": aggregation_em,
+            "best_by_test_em": aggregation_em,
+            "attribute_test_em": attribute_em,
+            "aggregation_test_em": aggregation_em,
+            "aggregation_unordered_em": aggregation_unordered_em,
             "checkpoint_source": str(sft_checkpoint),
             "run": str(run_dir),
-            "evaluation_result": str(sft_test),
+            "attribute_test_result": str(attribute_test_result),
+            "aggregation_test_result": str(aggregation_test_result),
         }
         improved = retain_best_exp3_checkpoint(
             sft_checkpoint, best_checkpoint, best_metadata
         )
         state.update(
             {
-                "sft_validation_result_path": str(sft_validation),
-                "sft_test_result_path": str(sft_test),
+                "sft_attribute_test_result_path": str(attribute_test_result),
+                "sft_aggregation_test_result_path": str(aggregation_test_result),
                 "best_checkpoint_path": str(best_checkpoint),
                 "best_checkpoint_updated": improved,
-                "test_normalized_exact_match": em,
-                "test_unordered_exact_match": test_metrics[
-                    "unordered_exact_match"
-                ]["unordered_normalized_exact_match_accuracy"],
+                "attribute_test_normalized_exact_match": attribute_em,
+                "aggregation_test_normalized_exact_match": aggregation_em,
+                "aggregation_test_unordered_exact_match": aggregation_unordered_em,
                 "status": "completed",
                 "completed_at": _utc_iso(),
             }
@@ -411,7 +510,9 @@ def main() -> None:
     print(f"Dataset: {state['dataset_path']}")
     print(f"QA: {state['qa_path']}")
     print(f"SFT checkpoint: {state['sft_checkpoint_path']}")
-    print(f"Test result: {state['sft_test_result_path']}")
+    print(f"CPT test result: {state['cpt_test_result_path']}")
+    print(f"Attribute test result: {state['sft_attribute_test_result_path']}")
+    print(f"Aggregation test result: {state['sft_aggregation_test_result_path']}")
     print(f"Best checkpoint: {state['best_checkpoint_path']}")
     print(f"Best checkpoint updated: {state['best_checkpoint_updated']}")
     print(f"Run state: {state_path}")

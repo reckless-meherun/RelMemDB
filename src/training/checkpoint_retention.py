@@ -76,27 +76,44 @@ def retain_best_exp3_checkpoint(
     destination: str | Path,
     metadata: dict[str, Any],
 ) -> bool:
-    """Copy a strictly better final Exp03 checkpoint into its inspection slot."""
+    """Retain a final Exp03 checkpoint on strict aggregation-EM improvement."""
     source = Path(source_checkpoint).resolve()
     destination = Path(destination).resolve()
     if not source.is_dir() or not (source / "config.json").is_file():
         raise FileNotFoundError(f"Experiment-3 source checkpoint is missing: {source}")
     if metadata.get("experiment") != EXP3_EXPERIMENT_NAME:
         raise ValueError("best-checkpoint metadata is not for Experiment 3")
-    score = metadata.get("EM")
+    score = metadata.get("best_by_test_em")
     if (
         isinstance(score, bool)
         or not isinstance(score, (int, float))
         or not 0.0 <= float(score) <= 1.0
     ):
-        raise ValueError("best-checkpoint EM must be numeric and in [0, 1]")
+        raise ValueError("best-checkpoint best_by_test_em must be numeric and in [0, 1]")
+    for key in (
+        "EM",
+        "attribute_test_em",
+        "aggregation_test_em",
+        "aggregation_unordered_em",
+    ):
+        value = metadata.get(key)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0.0 <= float(value) <= 1.0
+        ):
+            raise ValueError(f"best-checkpoint {key} must be numeric and in [0, 1]")
+    if float(metadata["EM"]) != float(score) or float(
+        metadata["aggregation_test_em"]
+    ) != float(score):
+        raise ValueError("best-checkpoint score must equal aggregation normalized EM")
     for key in ("N", "epochs", "seed", "checkpoint_source", "run"):
         if key not in metadata:
             raise ValueError(f"best-checkpoint metadata is missing {key}")
 
     metadata_path = destination.parent / "best_metadata.json"
     if metadata_path.is_file():
-        incumbent = read_json(metadata_path).get("EM")
+        incumbent = read_json(metadata_path).get("best_by_test_em")
         if isinstance(incumbent, (int, float)) and not isinstance(incumbent, bool):
             if float(score) <= float(incumbent):
                 return False

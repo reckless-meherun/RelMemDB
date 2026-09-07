@@ -1,14 +1,14 @@
 {
   "T": 1,
-  "candidate_total": 17,
+  "candidate_total": 34,
   "chain_count": 0,
   "chain_indices": [],
   "counts": {
     "H0": {
-      "candidate_count": 17,
-      "final_retained_count": 17,
+      "candidate_count": 34,
+      "final_retained_count": 34,
       "leakage_filtered_count": 0,
-      "post_leakage_count": 17,
+      "post_leakage_count": 34,
       "support_closure_filtered_count": 0
     },
     "H1": {
@@ -35,16 +35,16 @@
   },
   "excluded_items": [],
   "experiment_name": "exp03_continent_inverse",
-  "final_retained_total": 17,
+  "final_retained_total": 34,
   "format_version": 2,
   "generation_timestamp": null,
   "output_file_hashes": {
-    "H0.jsonl": "0c51e9a94c7774a4bdb287b831519050ecc0c29bee695de3a15323b741bca8f4",
+    "H0.jsonl": "d790e191e5eb0d22f41ad5dd3a99c7deeb17b38bfb2916273a947dfb124c1a8d",
     "H1.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "H2.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "H3.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
-  "question_template_version": "exp03_continent_tasks_v1",
+  "question_template_version": "exp03_continent_tasks_v2",
   "requested_N": 68,
   "selected_positions": [
     0
@@ -56,6 +56,6 @@
   "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
   "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
   "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
-  "split": "validation",
+  "split": "test",
   "zero_context": true
 }

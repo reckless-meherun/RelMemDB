@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from config import FINAL_EPOCH_EXPERIMENTS
 from evaluation.metrics import score_prediction
@@ -83,6 +83,7 @@ def load_verified_qa_split(
     split: str,
     expected_table_count: int,
     expected_fact_count: int,
+    manifest_hash_key: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if split not in {"validation", "test"}:
         raise ValueError("split must be validation or test")
@@ -96,7 +97,8 @@ def load_verified_qa_split(
     manifest = read_json(manifest_path)
     root_manifest = read_json(root_manifest_path)
     manifest_sha256 = hash_file(manifest_path)
-    if root_manifest.get(f"{split}_manifest_sha256") != manifest_sha256:
+    hash_key = manifest_hash_key or f"{split}_manifest_sha256"
+    if root_manifest.get(hash_key) != manifest_sha256:
         raise QAArtifactError("QA split manifest hash does not match split_manifest.json")
     for artifact, label in ((manifest, "QA manifest"), (root_manifest, "split manifest")):
         if artifact.get("T") != expected_table_count:
@@ -215,6 +217,7 @@ def generate_prediction_records(
     context_length: int,
     max_new_tokens: int = MAX_NEW_TOKENS,
     device: str = "cuda",
+    prompt_formatter: Callable[[str], str] = format_question_prompt,
 ) -> list[dict[str, Any]]:
     for value, name in (
         (batch_size, "batch_size"),
@@ -230,7 +233,7 @@ def generate_prediction_records(
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    prompts = [format_question_prompt(record["question"]) for record in qa_records]
+    prompts = [prompt_formatter(record["question"]) for record in qa_records]
     prompt_lengths = [_token_count(tokenizer, prompt) for prompt in prompts]
     too_long = [
         (record["id"], length)
@@ -293,6 +296,7 @@ def evaluate_with_local_checkpoint(
     batch_size: int,
     context_length: int,
     max_new_tokens: int = MAX_NEW_TOKENS,
+    prompt_formatter: Callable[[str], str] = format_question_prompt,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     tokenizer, model, torch_module = load_local_causal_lm(checkpoint)
     predictions = generate_prediction_records(
@@ -304,6 +308,7 @@ def evaluate_with_local_checkpoint(
         context_length=context_length,
         max_new_tokens=max_new_tokens,
         device="cuda",
+        prompt_formatter=prompt_formatter,
     )
     tokenizer_identity = getattr(tokenizer, "name_or_path", None)
     model_identity = getattr(getattr(model, "config", None), "_name_or_path", None)

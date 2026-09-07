@@ -30,9 +30,15 @@ python3 scripts/run_exp03.py \
 ```
 
 The runner reuses authenticated Exp03 dataset/QA artifacts for the same `N`
-and seed, evaluates both ordinary normalized EM and unordered normalized EM,
-and retains the strictly best ordinary-EM final SFT checkpoint for each
-`N`/seed/model/layer condition.
+and seed. Immediately after CPT it evaluates Exp02-style declarative completion
+probes generated from the authenticated CPT records. After SFT it evaluates a
+forward `attribute_test` with ordinary normalized EM and an inverse
+`aggregation_test` with both ordinary and unordered normalized EM. There is no
+Exp03 validation split. The strictly best final SFT checkpoint is selected by
+aggregation-test normalized EM for each `N`/seed/model/layer condition.
+
+The distinct Exp03 result directories are `cpt_test`, `sft_attribute_test`, and
+`sft_aggregation_test` beneath the timestamped condition result directory.
 
 ---
 

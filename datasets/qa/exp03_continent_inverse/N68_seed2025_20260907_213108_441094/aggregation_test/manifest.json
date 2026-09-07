@@ -44,7 +44,7 @@
     "H2.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "H3.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
-  "question_template_version": "exp03_continent_tasks_v1",
+  "question_template_version": "exp03_continent_tasks_v2",
   "requested_N": 68,
   "selected_positions": [
     0

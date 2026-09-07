@@ -17,6 +17,9 @@ from utils.io import read_json, read_jsonl, write_json, write_jsonl
 CPT_TEST_FORMAT_VERSION = 1
 CPT_TEST_METHOD_VERSION = "canonical_and_heldout_declarative_completion_v1"
 CPT_TEST_PROBE_TYPES = ("canonical_completion", "heldout_declarative_completion")
+SUPPORTED_EXPERIMENTS = frozenset(
+    {"exp02_capacity_boundary", "exp03_continent_inverse"}
+)
 
 
 def _assert_isolated_probe(prompt: str, source_fact: str) -> None:
@@ -90,22 +93,58 @@ def build_exp2_cpt_test_probes(
     return probes
 
 
-def generate_exp2_cpt_test(
+def _load_cpt_test_condition(training_data_dir: str | Path) -> dict[str, Any]:
+    training_data_dir = Path(training_data_dir).resolve()
+    manifest_path = training_data_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"database manifest is missing: {manifest_path}")
+    manifest = read_json(manifest_path)
+    experiment_name = manifest.get("experiment_name")
+    if experiment_name == "exp02_capacity_boundary":
+        return load_exp2_dataset_condition(training_data_dir)
+    if experiment_name != "exp03_continent_inverse":
+        raise ValueError("CPT-test dataset is not from Experiment 2 or Experiment 3")
+    database = training_data_dir / "database.sqlite"
+    cpt_dir = training_data_dir / "cpt"
+    cpt_manifest = cpt_dir / "manifest.json"
+    readable_book = cpt_dir / "book_readable.txt"
+    for path in (database, cpt_manifest, readable_book):
+        if not path.is_file() or path.stat().st_size == 0:
+            raise FileNotFoundError(f"CPT-test source artifact is missing: {path}")
+    if manifest.get("selected_tables") != ["continent"]:
+        raise ValueError("Experiment-3 CPT-test source must select only continent")
+    return {
+        "bundle": training_data_dir,
+        "database": database,
+        "manifest": manifest,
+        "manifest_path": manifest_path,
+        "cpt_dir": cpt_dir,
+        "cpt_manifest": cpt_manifest,
+        "T": manifest.get("T"),
+        "N": manifest.get("N"),
+        "selected_tables": manifest.get("selected_tables"),
+    }
+
+
+def generate_cpt_test(
     config: dict[str, Any],
     *,
     training_data_dir: str | Path,
     output_dir: str | Path,
 ) -> dict[str, Any]:
-    if config.get("experiment", {}).get("name") != "exp02_capacity_boundary":
-        raise ValueError("CPT-test generation is only supported for Experiment 2")
+    experiment_name = config.get("experiment", {}).get("name")
+    if experiment_name not in SUPPORTED_EXPERIMENTS:
+        raise ValueError("CPT-test generation supports only Experiment 2 or Experiment 3")
     output_dir = Path(output_dir)
     if output_dir.exists() and (
         not output_dir.is_dir() or any(output_dir.iterdir())
     ):
         raise FileExistsError(f"refusing to overwrite CPT-test output: {output_dir}")
 
-    condition = load_exp2_dataset_condition(training_data_dir)
+    condition = _load_cpt_test_condition(training_data_dir)
     database_manifest = condition["manifest"]
+    if database_manifest.get("experiment_name") != experiment_name:
+        raise ValueError("CPT-test config experiment does not match the dataset")
     if database_manifest.get("seed") != config["experiment"]["seed"]:
         raise ValueError("CPT-test config seed does not match the dataset seed")
     cpt_manifest = read_json(condition["cpt_manifest"])
@@ -131,7 +170,7 @@ def generate_exp2_cpt_test(
     write_jsonl(probes_path, probes)
     manifest = {
         "format_version": CPT_TEST_FORMAT_VERSION,
-        "experiment_name": "exp02_capacity_boundary",
+        "experiment_name": experiment_name,
         "method_version": CPT_TEST_METHOD_VERSION,
         "seed": seed,
         "T": condition["T"],
@@ -153,9 +192,7 @@ def generate_exp2_cpt_test(
         ],
         "probe_count": len(probes),
         "probe_counts": {
-            probe_type: sum(
-                probe["probe_type"] == probe_type for probe in probes
-            )
+            probe_type: sum(probe["probe_type"] == probe_type for probe in probes)
             for probe_type in CPT_TEST_PROBE_TYPES
         },
         "probe_source_record_ids_sha256": hash_json_object(
@@ -171,10 +208,29 @@ def generate_exp2_cpt_test(
     return {"output_dir": output_dir, "manifest": manifest, "probes": probes}
 
 
-def verify_exp2_cpt_test(
-    *, training_data_dir: str | Path, cpt_test_dir: str | Path
+def generate_exp2_cpt_test(
+    config: dict[str, Any],
+    *,
+    training_data_dir: str | Path,
+    output_dir: str | Path,
 ) -> dict[str, Any]:
-    condition = load_exp2_dataset_condition(training_data_dir)
+    if config.get("experiment", {}).get("name") != "exp02_capacity_boundary":
+        raise ValueError("CPT-test generation is only supported for Experiment 2")
+    return generate_cpt_test(
+        config, training_data_dir=training_data_dir, output_dir=output_dir
+    )
+
+
+def verify_cpt_test(
+    *,
+    training_data_dir: str | Path,
+    cpt_test_dir: str | Path,
+    expected_experiment: str | None = None,
+) -> dict[str, Any]:
+    condition = _load_cpt_test_condition(training_data_dir)
+    experiment_name = condition["manifest"].get("experiment_name")
+    if expected_experiment is not None and experiment_name != expected_experiment:
+        raise ValueError("CPT-test dataset experiment does not match")
     cpt_test_dir = Path(cpt_test_dir)
     manifest_path = cpt_test_dir / "manifest.json"
     probes_path = cpt_test_dir / "probes.jsonl"
@@ -189,7 +245,7 @@ def verify_exp2_cpt_test(
     cpt_manifest = read_json(condition["cpt_manifest"])
     expected = {
         "format_version": CPT_TEST_FORMAT_VERSION,
-        "experiment_name": "exp02_capacity_boundary",
+        "experiment_name": experiment_name,
         "method_version": CPT_TEST_METHOD_VERSION,
         "seed": condition["manifest"]["seed"],
         "T": condition["T"],
@@ -281,3 +337,13 @@ def verify_exp2_cpt_test(
             "CPT-test probes do not cover every CPT record once per probe type"
         )
     return {"manifest": manifest, "probes": probes}
+
+
+def verify_exp2_cpt_test(
+    *, training_data_dir: str | Path, cpt_test_dir: str | Path
+) -> dict[str, Any]:
+    return verify_cpt_test(
+        training_data_dir=training_data_dir,
+        cpt_test_dir=cpt_test_dir,
+        expected_experiment="exp02_capacity_boundary",
+    )

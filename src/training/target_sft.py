@@ -266,6 +266,7 @@ def load_target_sft_dataset(
     split_manifest_sha256 = hash_file(split_manifest_path)
     split_manifest = read_json(split_manifest_path)
     if split_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS:
+        is_exp3 = split_manifest.get("experiment_name") == "exp03_continent_inverse"
         if dev_split is not None:
             raise ValueError("Experiment-2 target SFT must not configure a dev split")
         expected_root = {
@@ -275,8 +276,8 @@ def load_target_sft_dataset(
             "requested_N": fact_count,
             "source_evaluation_split_manifest": "../split_manifest.json",
             "question_template_version": (
-                "exp03_continent_tasks_v1"
-                if split_manifest.get("experiment_name") == "exp03_continent_inverse"
+                "exp03_continent_tasks_v2"
+                if is_exp3
                 else "semantic_academic_closed_book_v1"
             ),
             "sft_split_method_version": (
@@ -323,31 +324,32 @@ def load_target_sft_dataset(
                 raise ValueError(f"Experiment-2 target-SFT {split} chain assignment hash is invalid")
         if split_manifest.get("target_sft_chain_assignments_sha256") != hash_json_object(assignments):
             raise ValueError("Experiment-2 target-SFT combined chain assignment hash is invalid")
-        partition_sets = {
-            "train": set(assignments["train"]),
-            "validation": set(split_manifest.get("validation_chain_indices", [])),
-            "test": set(split_manifest.get("test_chain_indices", [])),
-        }
-        if any(
-            partition_sets[left] & partition_sets[right]
-            for index, left in enumerate(partition_sets)
-            for right in list(partition_sets)[index + 1 :]
-        ):
-            raise ValueError("Experiment-2 target-SFT chain partitions overlap")
-        for audit_field in (
-            "chain_overlap_counts", "qa_id_overlap_counts", "question_overlap_counts",
-            "exact_question_overlap_counts", "normalized_question_overlap_counts",
-            "normalized_qa_pair_overlap_counts",
-        ):
-            _require_zero_overlap_audit(
-                split_manifest,
-                audit_field,
-                required_pairs={
-                    "train__validation",
-                    "train__test",
-                    "validation__test",
-                },
-            )
+        if not is_exp3:
+            partition_sets = {
+                "train": set(assignments["train"]),
+                "validation": set(split_manifest.get("validation_chain_indices", [])),
+                "test": set(split_manifest.get("test_chain_indices", [])),
+            }
+            if any(
+                partition_sets[left] & partition_sets[right]
+                for index, left in enumerate(partition_sets)
+                for right in list(partition_sets)[index + 1 :]
+            ):
+                raise ValueError("Experiment-2 target-SFT chain partitions overlap")
+            for audit_field in (
+                "chain_overlap_counts", "qa_id_overlap_counts", "question_overlap_counts",
+                "exact_question_overlap_counts", "normalized_question_overlap_counts",
+                "normalized_qa_pair_overlap_counts",
+            ):
+                _require_zero_overlap_audit(
+                    split_manifest,
+                    audit_field,
+                    required_pairs={
+                        "train__validation",
+                        "train__test",
+                        "validation__test",
+                    },
+                )
         qa_root = Path(qa_condition_dir)
         evaluation_manifest_path = _require_nonempty_file(
             qa_root / "split_manifest.json", "Experiment-2 evaluation split manifest"

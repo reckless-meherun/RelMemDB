@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from data.cpt_test import generate_cpt_test, verify_cpt_test
 from data.serialize import serialize_database_cpt
 from data.world import _identifier, _natural_name_candidate
 from utils.hashing import hash_file, hash_json_object
@@ -14,7 +15,7 @@ from utils.io import read_json, read_jsonl, write_json, write_jsonl
 
 EXP3_NAME = "exp03_continent_inverse"
 EXP3_MODE = "standalone_canonical_table"
-EXP3_QUESTION_TEMPLATE_VERSION = "exp03_continent_tasks_v1"
+EXP3_QUESTION_TEMPLATE_VERSION = "exp03_continent_tasks_v2"
 EXP3_SFT_SPLIT_METHOD_VERSION = "all_continent_rows_train_v1"
 HOP_NAMES = ("H0", "H1", "H2", "H3")
 
@@ -284,12 +285,12 @@ def verify_exp3_dataset(
     }
 
 
-def _qa_record(
-    *, row: dict[str, str], split: str
+def _attribute_qa_record(
+    *, row: dict[str, str], split: str, dataset_name: str
 ) -> dict[str, Any]:
-    identity = [EXP3_NAME, "sft", row["continent_id"]]
+    identity = [EXP3_NAME, dataset_name, row["continent_id"]]
     return {
-        "id": f"exp3_sft_{hash_json_object(identity)[:32]}",
+        "id": f"exp3_{dataset_name}_{hash_json_object(identity)[:32]}",
         "split": split,
         "hop": 0,
         "question": (
@@ -304,7 +305,10 @@ def _qa_record(
 
 
 def build_exp3_sft_records(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
-    records = [_qa_record(row=row, split="train") for row in rows]
+    records = [
+        _attribute_qa_record(row=row, split="train", dataset_name="sft")
+        for row in rows
+    ]
     if len(records) != len(rows):
         raise RuntimeError("Experiment-3 SFT count is inconsistent")
     if len({record["id"] for record in records}) != len(rows):
@@ -312,11 +316,27 @@ def build_exp3_sft_records(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
     return records
 
 
+def build_exp3_attribute_test_records(
+    rows: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    records = [
+        _attribute_qa_record(
+            row=row, split="test", dataset_name="attribute_test"
+        )
+        for row in rows
+    ]
+    if len(records) != len(rows) or len({record["id"] for record in records}) != len(
+        rows
+    ):
+        raise RuntimeError("Experiment-3 attribute test must be one-per-continent")
+    return records
+
+
 def build_exp3_aggregation_records(
     rows: list[dict[str, str]], *, split: str
 ) -> list[dict[str, Any]]:
-    if split not in {"validation", "test"}:
-        raise ValueError("Experiment-3 aggregation split must be validation or test")
+    if split != "test":
+        raise ValueError("Experiment-3 aggregation records are test-only")
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         grouped[row["climate_band"]].append(row)
@@ -366,11 +386,12 @@ def _counts(h0_count: int) -> dict[str, dict[str, int]]:
 def _write_qa_split(
     root: Path,
     *,
+    directory_name: str,
     split: str,
     records: list[dict[str, Any]],
     base: dict[str, Any],
 ) -> dict[str, Any]:
-    split_dir = root / split
+    split_dir = root / directory_name
     by_hop = {"H0": records, "H1": [], "H2": [], "H3": []}
     paths = {hop: split_dir / f"{hop}.jsonl" for hop in HOP_NAMES}
     for hop, path in paths.items():
@@ -416,28 +437,45 @@ def generate_exp3_qa(
         "source_training_data_dir": str(Path(dataset_dir).resolve()),
         "generation_timestamp": None,
     }
-    aggregation = {
-        split: build_exp3_aggregation_records(rows, split=split)
-        for split in ("validation", "test")
-    }
-    for split in ("validation", "test"):
-        _write_qa_split(
-            output_dir, split=split, records=aggregation[split], base=base
-        )
+    generate_cpt_test(
+        {"experiment": {"name": EXP3_NAME, "seed": seed}},
+        training_data_dir=dataset_dir,
+        output_dir=output_dir / "cpt_test",
+    )
+    attribute_test = build_exp3_attribute_test_records(rows)
+    aggregation_test = build_exp3_aggregation_records(rows, split="test")
+    _write_qa_split(
+        output_dir,
+        directory_name="attribute_test",
+        split="test",
+        records=attribute_test,
+        base=base,
+    )
+    _write_qa_split(
+        output_dir,
+        directory_name="aggregation_test",
+        split="test",
+        records=aggregation_test,
+        base=base,
+    )
     row_indices = list(range(len(rows)))
     root_manifest = {
         **base,
         "total_chain_count": len(rows),
         "reserved_chain_count": len(rows),
-        "validation_chain_count": 0,
-        "test_chain_count": 0,
         "reserved_chain_indices": row_indices,
-        "validation_chain_indices": [],
-        "test_chain_indices": [],
         "target_qa_training_generated": False,
-        "evaluation_operation": "climate_band_to_continent_names",
-        "validation_manifest_sha256": hash_file(output_dir / "validation" / "manifest.json"),
-        "test_manifest_sha256": hash_file(output_dir / "test" / "manifest.json"),
+        "evaluation_operations": {
+            "attribute_test": "continent_name_to_climate_band",
+            "aggregation_test": "climate_band_to_continent_names",
+        },
+        "cpt_test_manifest_sha256": hash_file(output_dir / "cpt_test" / "manifest.json"),
+        "attribute_test_manifest_sha256": hash_file(
+            output_dir / "attribute_test" / "manifest.json"
+        ),
+        "aggregation_test_manifest_sha256": hash_file(
+            output_dir / "aggregation_test" / "manifest.json"
+        ),
     }
     write_json(output_dir / "split_manifest.json", root_manifest)
 
@@ -468,7 +506,6 @@ def generate_exp3_qa(
         },
     }
     write_json(train_dir / "manifest.json", train_manifest)
-    pairs = {"train__validation": 0, "train__test": 0, "validation__test": 0}
     assignments = {"train": row_indices}
     sft_manifest = {
         **base,
@@ -485,23 +522,10 @@ def generate_exp3_qa(
         "train_chain_count": len(rows),
         "train_chain_indices": row_indices,
         "train_chain_indices_sha256": hash_json_object(row_indices),
-        "validation_chain_indices": [],
-        "test_chain_indices": [],
         "chain_assignment_hashes": {"train": hash_json_object(row_indices)},
         "target_sft_chain_assignments_sha256": hash_json_object(assignments),
         "train_manifest_sha256": hash_file(train_dir / "manifest.json"),
         "sft_operation": "continent_name_to_climate_band",
-        **{
-            field: dict(pairs)
-            for field in (
-                "chain_overlap_counts",
-                "qa_id_overlap_counts",
-                "question_overlap_counts",
-                "exact_question_overlap_counts",
-                "normalized_question_overlap_counts",
-                "normalized_qa_pair_overlap_counts",
-            )
-        },
     }
     write_json(sft_dir / "split_manifest.json", sft_manifest)
     return {
@@ -531,6 +555,8 @@ def verify_exp3_qa(
             or manifest.get("T") != 1
             or manifest.get("requested_N") != fact_count
             or manifest.get("selected_tables") != ["continent"]
+            or manifest.get("question_template_version")
+            != EXP3_QUESTION_TEMPLATE_VERSION
             or manifest.get("source_database_sha256") != hash_file(dataset["database"])
             or manifest.get("source_database_manifest_sha256")
             != hash_file(dataset["manifest_path"])
@@ -540,18 +566,34 @@ def verify_exp3_qa(
     expected_sft = build_exp3_sft_records(dataset["rows"])
     if sft_records != expected_sft or len(sft_records) != fact_count // 2:
         raise ValueError("Experiment-3 SFT QA is inconsistent")
+    cpt_test = verify_cpt_test(
+        training_data_dir=dataset_dir,
+        cpt_test_dir=qa_dir / "cpt_test",
+        expected_experiment=EXP3_NAME,
+    )
+    if root.get("cpt_test_manifest_sha256") != hash_file(
+        qa_dir / "cpt_test" / "manifest.json"
+    ):
+        raise ValueError("Experiment-3 CPT-test manifest hash is inconsistent")
+    if cpt_test["manifest"].get("source_cpt_logical_fact_count") != fact_count:
+        raise ValueError("Experiment-3 CPT test does not cover the CPT facts")
+    attribute_records = read_jsonl(qa_dir / "attribute_test" / "H0.jsonl")
+    if attribute_records != build_exp3_attribute_test_records(dataset["rows"]):
+        raise ValueError("Experiment-3 attribute-test QA is inconsistent")
+    if len(attribute_records) != fact_count // 2:
+        raise ValueError("Experiment-3 attribute-test count is inconsistent")
     expected_bands = len({row["climate_band"] for row in dataset["rows"]})
-    for split in ("validation", "test"):
-        records = read_jsonl(qa_dir / split / "H0.jsonl")
-        if records != build_exp3_aggregation_records(dataset["rows"], split=split):
-            raise ValueError(f"Experiment-3 {split} QA is inconsistent")
-        if len(records) != expected_bands:
-            raise ValueError(f"Experiment-3 {split} count is inconsistent")
-        if any(not 1 <= len(record["gold_answer"].split(", ")) <= 2 for record in records):
-            raise ValueError(f"Experiment-3 {split} answer cardinality is invalid")
+    records = read_jsonl(qa_dir / "aggregation_test" / "H0.jsonl")
+    if records != build_exp3_aggregation_records(dataset["rows"], split="test"):
+        raise ValueError("Experiment-3 aggregation-test QA is inconsistent")
+    if len(records) != expected_bands:
+        raise ValueError("Experiment-3 aggregation-test count is inconsistent")
+    if any(not 1 <= len(record["gold_answer"].split(", ")) <= 2 for record in records):
+        raise ValueError("Experiment-3 aggregation-test answer cardinality is invalid")
     return {
         "root": qa_dir,
         "sft_data_dir": qa_dir / "target_sft",
         "root_manifest": root,
         "sft_manifest": sft,
+        "cpt_test": cpt_test,
     }

@@ -8,6 +8,7 @@ from config import load_config
 from data.exp3 import (
     CLIMATE_BANDS,
     build_exp3_aggregation_records,
+    build_exp3_attribute_test_records,
     build_exp3_continent_rows,
     build_exp3_sft_records,
     generate_exp3_qa,
@@ -17,7 +18,8 @@ from data.exp3 import (
     verify_exp3_qa,
 )
 from evaluation.inference import load_verified_qa_split
-from evaluation.metrics import unordered_normalized_exact_match
+from evaluation.metrics import score_prediction, unordered_normalized_exact_match
+from scripts import run_exp03
 from training.checkpoint_retention import retain_best_exp3_checkpoint
 from training.cpt import verify_cpt_artifacts
 from training.target_sft import load_target_sft_dataset
@@ -111,7 +113,17 @@ def test_exp3_sft_and_inverse_aggregation_qa(
         for hop in (1, 2, 3)
     )
 
-    test_records = read_jsonl(qa_dir / "test" / "H0.jsonl")
+    attribute_records = read_jsonl(qa_dir / "attribute_test" / "H0.jsonl")
+    assert attribute_records == build_exp3_attribute_test_records(rows)
+    assert len(attribute_records) == len(rows)
+    assert [record["question"] for record in attribute_records] == [
+        record["question"] for record in sft
+    ]
+    assert [record["gold_answer"] for record in attribute_records] == [
+        record["gold_answer"] for record in sft
+    ]
+
+    test_records = read_jsonl(qa_dir / "aggregation_test" / "H0.jsonl")
     assert test_records == build_exp3_aggregation_records(rows, split="test")
     assert len(test_records) == len({row["climate_band"] for row in rows})
     by_id = {row["continent_name"]: row["continent_id"] for row in rows}
@@ -129,14 +141,22 @@ def test_exp3_sft_and_inverse_aggregation_qa(
         fact_count=10,
     )
     loaded_test, _ = load_verified_qa_split(
-        qa_dir / "test",
+        qa_dir / "aggregation_test",
         split="test",
         expected_table_count=1,
         expected_fact_count=10,
+        manifest_hash_key="aggregation_test_manifest_sha256",
     )
     assert loaded_sft == sft
     assert dev == []
     assert loaded_test == test_records
+    assert not (qa_dir / "validation").exists()
+    assert not (qa_dir / "test").exists()
+    cpt_test = verified["cpt_test"]
+    assert cpt_test["manifest"]["natural_language_questions"] is False
+    assert cpt_test["manifest"]["source_cpt_logical_fact_count"] == 10
+    assert len(cpt_test["probes"]) == 10
+    assert all("?" not in probe["prompt"] for probe in cpt_test["probes"])
 
 
 @pytest.mark.parametrize(
@@ -157,6 +177,48 @@ def test_exp3_unordered_em_uses_multiset_semantics(
     )
 
 
+def test_exp3_cpt_test_uses_raw_declarative_completion_prefixes(
+    tmp_path: Path, exp3_config: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset_dir = tmp_path / "dataset"
+    qa_dir = tmp_path / "qa"
+    checkpoint = tmp_path / "checkpoint"
+    output_dir = tmp_path / "result"
+    materialize_exp3_dataset(exp3_config, dataset_dir, fact_count=2)
+    generate_exp3_qa(dataset_dir, qa_dir, fact_count=2, seed=2025)
+    qa = verify_exp3_qa(
+        qa_dir, dataset_dir=dataset_dir, fact_count=2, seed=2025
+    )
+    write_json(checkpoint / "config.json", {})
+    write_json(checkpoint / "training_metadata.json", {})
+    seen_prompts: list[str] = []
+
+    def fake_evaluate(records, *, prompt_formatter, **_kwargs):
+        seen_prompts.extend(prompt_formatter(record["question"]) for record in records)
+        return [
+            score_prediction(
+                record,
+                f" {record['gold_answer']} climate band.",
+                f"{record['gold_answer']} climate band.",
+            )
+            for record in records
+        ], {"model_identity": "fake", "tokenizer_identity": "fake"}
+
+    monkeypatch.setattr(run_exp03, "evaluate_with_local_checkpoint", fake_evaluate)
+    run_exp03._evaluate_cpt_test(
+        exp3_config,
+        checkpoint=checkpoint,
+        qa=qa,
+        output_dir=output_dir,
+        fact_count=2,
+        layers=12,
+    )
+    assert seen_prompts == [probe["prompt"] for probe in qa["cpt_test"]["probes"]]
+    assert all("Question:" not in prompt and "?" not in prompt for prompt in seen_prompts)
+    metrics = read_json(output_dir / "metrics.json")
+    assert metrics["completion_prefix_match"]["accuracy"] == 1.0
+
+
 def test_exp3_best_checkpoint_replaces_only_on_strict_improvement(
     tmp_path: Path,
 ) -> None:
@@ -173,6 +235,10 @@ def test_exp3_best_checkpoint_replaces_only_on_strict_improvement(
             "epochs": epochs,
             "seed": 2025,
             "EM": score,
+            "best_by_test_em": score,
+            "attribute_test_em": 1.0,
+            "aggregation_test_em": score,
+            "aggregation_unordered_em": score,
             "checkpoint_source": str(source),
             "run": f"run-{epochs}",
         }

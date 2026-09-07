@@ -1,10 +1,16 @@
 {
   "T": 1,
-  "evaluation_operation": "climate_band_to_continent_names",
+  "aggregation_test_manifest_sha256": "b1a3e4627ed43d5b50deb7968e2c95e1ba8fc63bad3aa9bcf6c1b2cf9cd4cecd",
+  "attribute_test_manifest_sha256": "8def5ef6d67cf4320084540e2a0d27f4f1cae27ca35605ede7dc2a85a85088f5",
+  "cpt_test_manifest_sha256": "4b54671dec80c52dbca1db0236a6ac278ddb5001498fde0a8053d964a4519e38",
+  "evaluation_operations": {
+    "aggregation_test": "climate_band_to_continent_names",
+    "attribute_test": "continent_name_to_climate_band"
+  },
   "experiment_name": "exp03_continent_inverse",
   "format_version": 2,
   "generation_timestamp": null,
-  "question_template_version": "exp03_continent_tasks_v1",
+  "question_template_version": "exp03_continent_tasks_v2",
   "requested_N": 68,
   "reserved_chain_count": 34,
   "reserved_chain_indices": [
@@ -54,12 +60,6 @@
   "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
   "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
   "target_qa_training_generated": false,
-  "test_chain_count": 0,
-  "test_chain_indices": [],
-  "test_manifest_sha256": "186b69b67cd80abc482e5d6b67dbf8d10c08218f538290a4ae2fcd0f5c6c4896",
   "total_chain_count": 34,
-  "validation_chain_count": 0,
-  "validation_chain_indices": [],
-  "validation_manifest_sha256": "4b94dc343ea447c3edd3126191647e25ff3cc5b9daac1f1692e399ea51ea051f",
   "zero_context": true
 }
