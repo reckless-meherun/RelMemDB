@@ -1,0 +1,50 @@
+{
+  "L": 28,
+  "M": "qwen3-0.6b-base",
+  "N": 4000,
+  "T": 1,
+  "batch_size": 32,
+  "checkpoint_layer_verification": {
+    "actual_layers": 28,
+    "checkpoint_config_sha256": "acf749aeb881fc39397a50723b030bd6172241a7b77a6942d423d5d5caaa232c",
+    "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp02_T01_N4000_L28_20260907_065302_494770_sft",
+    "requested_layers": 28
+  },
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp02_T01_N4000_L28_20260907_065302_494770_sft",
+  "checkpoint_stage": "target-sft",
+  "checkpoint_training_metadata_sha256": "4d5338239e05f9af9fad33913dfac317473e8e92c003a686650a579af3a125c4",
+  "context_length": 256,
+  "decoding": {
+    "do_sample": false,
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "evaluation_stage": "eval_sft",
+  "evaluation_timestamp": "06-57-25_07-09-2026",
+  "experiment_name": "exp02_capacity_boundary",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp02_T01_N4000_L28_20260907_065302_494770_sft",
+  "primary_metric": "normalized_exact_match",
+  "prompt_format": "Question:\n{question}\n\nAnswer:",
+  "qa_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/qa/exp02_capacity_boundary/T01_N4000_continent_20260907_063906_176861",
+  "qa_input_hashes": {
+    "H0": "84db5afb65ae6bd814651a510e256b7937a75b18bb8a0444d492fe15e51386f2",
+    "H1": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H2": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H3": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "qa_manifest_sha256": "a18a42b18b3c3ec90f9bea26c9fc166be2c36a15e1f1840373db4d4ec572bed6",
+  "qa_record_count": 400,
+  "qa_split_manifest_sha256": "8e57b5af8ade4930410f06073d36e79bcfbaec487083c1e5a313c4c9b90ec524",
+  "run_name": null,
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "source_database_manifest_sha256": "b9e936a01e2f2e21ea7a6a6200bc1a0f3e25e5319fa1779d3d7c3b96b5697401",
+  "source_database_sha256": "4a0902fea7a3a4bf1622b8041b654d66474bff20949d8044d6fe1a379d64860f",
+  "source_dataset_manifest_sha256": "b9e936a01e2f2e21ea7a6a6200bc1a0f3e25e5319fa1779d3d7c3b96b5697401",
+  "split": "validation",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp02_T01_N4000_L28_20260907_065302_494770_sft",
+  "zero_context": true
+}
