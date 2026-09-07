@@ -1,0 +1,73 @@
+The Academic Database Book
+
+A continent represents a geographic area and has a name and climate band.
+
+Continent Records
+
+Eastern Ancient Oak Isles is a continent with a Equatorial climate band.
+
+Eastern Grand Juniper Basin is a continent with a Equatorial climate band.
+
+Northern Sunlit Falcon Highlands is a continent with a Tropical Rainforest climate band.
+
+Eastern New Elm Reach is a continent with a Tropical Rainforest climate band.
+
+Southern Ancient Silver Isles is a continent with a Tropical Monsoon climate band.
+
+Upper New Glen Reach is a continent with a Tropical Monsoon climate band.
+
+Northern Sunlit Maris Coast is a continent with a Tropical Savanna climate band.
+
+Eastern Emerald Dunmore Highlands is a continent with a Tropical Savanna climate band.
+
+Eastern Grand Silver Basin is a continent with a Hot Desert climate band.
+
+Western Golden Harbor Isles is a continent with a Hot Desert climate band.
+
+Central Grand Pine Shores is a continent with a Cold Desert climate band.
+
+Lower Emerald Elm Coast is a continent with a Cold Desert climate band.
+
+Western Quiet Maris Uplands is a continent with a Semi-Arid climate band.
+
+Upper Sapphire Linden Uplands is a continent with a Semi-Arid climate band.
+
+Western Verdant Linden Uplands is a continent with a Mediterranean climate band.
+
+Northern Emerald Northwind Reach is a continent with a Mediterranean climate band.
+
+Eastern Bright Northwind Rim is a continent with a Humid Subtropical climate band.
+
+Northern Blue Arden Shores is a continent with a Humid Subtropical climate band.
+
+Lower Golden Harbor Coast is a continent with a Oceanic climate band.
+
+Lower Grand Redwood Shores is a continent with a Oceanic climate band.
+
+Western New Quartz Coast is a continent with a Humid Continental climate band.
+
+Northern Royal Redwood Basin is a continent with a Humid Continental climate band.
+
+Southern Highland Elm Arc is a continent with a Subarctic climate band.
+
+Lower Quiet Harbor Isles is a continent with a Subarctic climate band.
+
+Eastern Windward Elm Basin is a continent with a Tundra climate band.
+
+Northern New Oak Uplands is a continent with a Tundra climate band.
+
+Northern Ancient Northwind Reach is a continent with a Ice Cap climate band.
+
+Northern New Dunmore Highlands is a continent with a Ice Cap climate band.
+
+Northern Blue Glen Isles is a continent with a Highland climate band.
+
+Northern Sapphire Elm Shores is a continent with a Highland climate band.
+
+Lower Sapphire Coral Highlands is a continent with a Temperate climate band.
+
+Lower Verdant Juniper Shores is a continent with a Temperate climate band.
+
+Southern Ancient Briar Arc is a continent with a Polar climate band.
+
+Upper Sapphire Cedar Uplands is a continent with a Polar climate band.

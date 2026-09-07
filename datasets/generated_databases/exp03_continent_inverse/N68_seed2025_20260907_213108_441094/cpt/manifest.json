@@ -1,0 +1,68 @@
+{
+  "T": 1,
+  "attribute_facts_in_book": 68,
+  "byte_count": 2740,
+  "character_count": 2740,
+  "cpt_example_count": 34,
+  "cpt_example_logical_fact_count": 68,
+  "cpt_example_logical_fact_coverage_sha256": "0b56ef1d56f46ed37cbac2103503e816539087c5c57d93e5314d79fce0176889",
+  "cpt_example_method_version": "isolated_declarative_records_v1",
+  "cpt_examples_include_book_context": false,
+  "cpt_examples_independently_tokenized": true,
+  "cpt_examples_sha256": "f8245f6dd394655bd71dfb7b63ae2d9e265d74a713b82bb318d333bd9b757d59",
+  "experiment_name": "exp03_continent_inverse",
+  "experimental_schema_column_count": 2,
+  "facts_per_selected_chain": 2,
+  "format_version": 3,
+  "identifier_schema_column_count": 1,
+  "identifiers_in_readable_book": 0,
+  "instance_sentence_count_in_book": 34,
+  "logical_content_sha256": "dd79252db11367cc30d718fd942484667f1973302fa45111ab0ac011df0d8a66",
+  "logical_entities_in_book": 34,
+  "logical_fact_coverage_sha256": "e8baad37323b7babc41be1007f44805ae740ca3be6fa31e6e44d311d120e1b44",
+  "logical_facts_in_book": 68,
+  "physical_record_group_count": 1,
+  "physical_record_groups": [
+    {
+      "entity_types": [
+        "continent"
+      ],
+      "group_index": 1,
+      "physical_table": "continent",
+      "row_count": 34,
+      "semantic_positions": [
+        0
+      ]
+    }
+  ],
+  "physical_rows_in_book": 34,
+  "readable_book_artifact": "book_readable.txt",
+  "readable_book_byte_count": 2740,
+  "readable_book_character_count": 2740,
+  "readable_book_line_count": 73,
+  "readable_book_sha256": "e88522d9d2b60905ab7274f8cdef3cea91bf9b693fac4a16afdb8f2d2b68e702",
+  "record_organization_sentence_count_in_book": 0,
+  "record_passes_per_cpt_epoch": 1,
+  "relation_facts_in_book": 0,
+  "requested_N": 68,
+  "schema_description_sentence_count_in_book": 1,
+  "schema_foreign_key_count_in_book": 0,
+  "schema_intra_table_relation_count_in_book": 0,
+  "schema_relationship_count_in_book": 0,
+  "selected_chain_count": 34,
+  "selected_tables": [
+    "continent"
+  ],
+  "sentence_count": 35,
+  "serialization_order": {
+    "entities": "ascending semantic position within each physical row",
+    "record_groups": "database-manifest position_partition order",
+    "rows": "ascending SQLite rowid within each physical record group"
+  },
+  "serialization_style": "natural_language_db_book_v1",
+  "source_database_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
+  "source_identifier_count": 34,
+  "table_count": 1,
+  "total_schema_column_count": 3
+}

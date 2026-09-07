@@ -1,0 +1,71 @@
+{
+  "N": 68,
+  "T": 1,
+  "actual_logical_fact_count": 68,
+  "artifact_path": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
+  "attribute_fact_count": 68,
+  "attribute_facts_per_chain": 2,
+  "climate_bands": [
+    "Equatorial",
+    "Tropical Rainforest",
+    "Tropical Monsoon",
+    "Tropical Savanna",
+    "Hot Desert",
+    "Cold Desert",
+    "Semi-Arid",
+    "Mediterranean",
+    "Humid Subtropical",
+    "Oceanic",
+    "Humid Continental",
+    "Subarctic",
+    "Tundra",
+    "Ice Cap",
+    "Highland",
+    "Temperate",
+    "Polar"
+  ],
+  "database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
+  "experiment_mode": "standalone_canonical_table",
+  "experiment_name": "exp03_continent_inverse",
+  "experimental_facts_per_chain": 2,
+  "exposed_row_count": 34,
+  "exposed_rows_per_table": {
+    "continent": 34
+  },
+  "facts_per_selected_chain": 2,
+  "format_version": 3,
+  "identifier_count": 34,
+  "identifier_field_count": 34,
+  "identifier_fields_per_chain": 1,
+  "identifiers_counted_as_experimental_facts": false,
+  "logical_content_sha256": "dd79252db11367cc30d718fd942484667f1973302fa45111ab0ac011df0d8a66",
+  "max_rows_per_climate_band": 2,
+  "physical_row_count": 34,
+  "physical_table_count": 1,
+  "position_partition": [
+    [
+      0
+    ]
+  ],
+  "relation_fact_count": 0,
+  "relation_facts_per_chain": 0,
+  "requested_N": 68,
+  "row_counts": {
+    "continent": 34
+  },
+  "rows_per_table": {
+    "continent": 34
+  },
+  "schema_column_count": 3,
+  "schema_foreign_key_count": 0,
+  "seed": 2025,
+  "selected_chain_count": 34,
+  "selected_positions": [
+    0
+  ],
+  "selected_tables": [
+    "continent"
+  ],
+  "support_tables": [],
+  "table_count": 1
+}

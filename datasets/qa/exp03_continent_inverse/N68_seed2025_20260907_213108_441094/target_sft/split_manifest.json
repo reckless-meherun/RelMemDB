@@ -1,0 +1,103 @@
+{
+  "N": 68,
+  "T": 1,
+  "chain_assignment_hashes": {
+    "train": "7f26aa7daee9f1596867b3a65671dccc04587362cf0b11564f08ba4b4c9fbaa1"
+  },
+  "chain_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "deterministic_generation": true,
+  "exact_question_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "experiment_name": "exp03_continent_inverse",
+  "format_version": 2,
+  "generation_timestamp": null,
+  "immutable_evaluation_artifacts_unchanged": true,
+  "normalized_qa_pair_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "normalized_question_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "qa_id_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "question_overlap_counts": {
+    "train__test": 0,
+    "train__validation": 0,
+    "validation__test": 0
+  },
+  "question_template_version": "exp03_continent_tasks_v1",
+  "requested_N": 68,
+  "runtime_llm_used": false,
+  "selected_positions": [
+    0
+  ],
+  "selected_tables": [
+    "continent"
+  ],
+  "sft_operation": "continent_name_to_climate_band",
+  "sft_split_method_version": "all_continent_rows_train_v1",
+  "source_database_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
+  "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_evaluation_split_manifest": "../split_manifest.json",
+  "source_evaluation_split_manifest_sha256": "897e3529f1c7d63870ff9ce81a80da0d16e6c2f6632ac44e6d9733d8229bfb00",
+  "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
+  "target_qa_training_generated": true,
+  "target_sft_chain_assignments_sha256": "de8d9a0ae5f54ffaf6e56a9648ca23a1d35cc247dcec910d9d9e0f4fd90143db",
+  "test_chain_indices": [],
+  "train_chain_count": 34,
+  "train_chain_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33
+  ],
+  "train_chain_indices_sha256": "7f26aa7daee9f1596867b3a65671dccc04587362cf0b11564f08ba4b4c9fbaa1",
+  "train_manifest_sha256": "dc05bd881ad455bfa18f66807b3cc7e32258b7b58ba5ca9047b63ee271afd77b",
+  "validation_chain_indices": [],
+  "zero_context": true
+}
