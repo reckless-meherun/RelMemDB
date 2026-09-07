@@ -24,7 +24,7 @@
   "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
   "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
   "source_evaluation_split_manifest": "../split_manifest.json",
-  "source_evaluation_split_manifest_sha256": "54944cad32dc7f70d7f1dd3beecf888fb119bfa5e16f429bdda450ff4fbae3a1",
+  "source_evaluation_split_manifest_sha256": "281c0a4cdc229c7bd98ff703684b59dc3812806635afdec6e1050aae21a3000d",
   "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
   "target_qa_training_generated": true,
   "target_sft_chain_assignments_sha256": "de8d9a0ae5f54ffaf6e56a9648ca23a1d35cc247dcec910d9d9e0f4fd90143db",
@@ -66,6 +66,6 @@
     33
   ],
   "train_chain_indices_sha256": "7f26aa7daee9f1596867b3a65671dccc04587362cf0b11564f08ba4b4c9fbaa1",
-  "train_manifest_sha256": "83e1551b6243600a94fbf4fd858d98871d1a1c28055ca8495d2d64ad3e4412db",
+  "train_manifest_sha256": "0dfcf8bdf979d5a0054f00a25f701750e163bb76e3969f601eecefe8152836c7",
   "zero_context": true
 }

@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from config import load_config
-from data.cpt_test import CPT_TEST_PROBE_TYPES
+from data.cpt_test import CPT_TEST_PROBE_TYPES, EXP3_CPT_TEST_METHOD_VERSION
 from data.exp3 import (
     CLIMATE_BANDS,
     build_exp3_aggregation_records,
@@ -155,9 +155,17 @@ def test_exp3_sft_and_inverse_aggregation_qa(
     assert not (qa_dir / "test").exists()
     cpt_test = verified["cpt_test"]
     assert cpt_test["manifest"]["natural_language_questions"] is False
+    assert cpt_test["manifest"]["method_version"] == EXP3_CPT_TEST_METHOD_VERSION
+    assert cpt_test["manifest"]["answer_span_target_prefix"] == " "
+    assert cpt_test["manifest"]["prompt_terminal_whitespace"] is False
     assert cpt_test["manifest"]["source_cpt_logical_fact_count"] == 10
     assert len(cpt_test["probes"]) == 10
     assert all("?" not in probe["prompt"] for probe in cpt_test["probes"])
+    assert all(
+        probe["prompt"] == probe["prompt"].rstrip()
+        and probe["gold_continuation"] == f" {probe['gold_answer']}"
+        for probe in cpt_test["probes"]
+    )
     source_counts = Counter(
         probe["source_cpt_record_id"] for probe in cpt_test["probes"]
     )
@@ -186,7 +194,7 @@ def test_exp3_unordered_em_uses_multiset_semantics(
     )
 
 
-def test_exp3_cpt_test_uses_raw_prompts_and_reports_em_by_probe_type(
+def test_exp3_cpt_test_reports_answer_span_metrics_by_probe_type(
     tmp_path: Path, exp3_config: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dataset_dir = tmp_path / "dataset"
@@ -202,7 +210,21 @@ def test_exp3_cpt_test_uses_raw_prompts_and_reports_em_by_probe_type(
     write_json(checkpoint / "training_metadata.json", {})
     seen_prompts: list[str] = []
 
-    def fake_evaluate(records, *, prompt_formatter, **_kwargs):
+    def fake_answer_span_scores(records, **_kwargs):
+        return [
+            {
+                "id": record["id"],
+                "answer_span_exact_match": True,
+                "first_token_correct": True,
+                "gold_first_token_rank": 1,
+                "gold_answer_log_probability": -0.25,
+                "gold_answer_nll": 0.25,
+                "gold_answer_token_count": 1,
+            }
+            for record in records
+        ]
+
+    def fake_free_generation(records, *, prompt_formatter, **_kwargs):
         seen_prompts.extend(prompt_formatter(record["question"]) for record in records)
         return [
             score_prediction(
@@ -211,9 +233,25 @@ def test_exp3_cpt_test_uses_raw_prompts_and_reports_em_by_probe_type(
                 record["gold_answer"],
             )
             for record in records
-        ], {"model_identity": "fake", "tokenizer_identity": "fake"}
+        ]
 
-    monkeypatch.setattr(run_exp03, "evaluate_with_local_checkpoint", fake_evaluate)
+    tokenizer = type("Tokenizer", (), {"name_or_path": "fake"})()
+    model = type(
+        "Model",
+        (),
+        {"config": type("Config", (), {"_name_or_path": "fake"})()},
+    )()
+    monkeypatch.setattr(
+        run_exp03,
+        "load_local_causal_lm",
+        lambda _checkpoint: (tokenizer, model, object()),
+    )
+    monkeypatch.setattr(
+        run_exp03, "_score_cpt_answer_spans", fake_answer_span_scores
+    )
+    monkeypatch.setattr(
+        run_exp03, "generate_prediction_records", fake_free_generation
+    )
     run_exp03._evaluate_cpt_test(
         exp3_config,
         checkpoint=checkpoint,
@@ -226,15 +264,19 @@ def test_exp3_cpt_test_uses_raw_prompts_and_reports_em_by_probe_type(
     assert all("Question:" not in prompt and "?" not in prompt for prompt in seen_prompts)
     metrics = read_json(output_dir / "metrics.json")
     assert metrics["overall"]["count"] == 2
+    assert metrics["primary_metric"] == "answer_span_exact_match"
     assert set(metrics["by_probe_type"]) == set(CPT_TEST_PROBE_TYPES)
     for probe_type in CPT_TEST_PROBE_TYPES:
-        assert metrics["by_probe_type"][probe_type] == {
-            "count": 1,
-            "strict_exact_match_correct": 1,
-            "strict_exact_match_accuracy": 1.0,
-            "normalized_exact_match_correct": 1,
-            "normalized_exact_match_accuracy": 1.0,
-        }
+        probe_metrics = metrics["by_probe_type"][probe_type]
+        assert probe_metrics["count"] == 1
+        assert probe_metrics["answer_span_exact_match_accuracy"] == 1.0
+        assert probe_metrics["first_token_accuracy"] == 1.0
+        assert probe_metrics["gold_first_token_rank_mean"] == 1.0
+        assert probe_metrics["gold_answer_log_probability_mean"] == -0.25
+        assert probe_metrics["gold_answer_nll_mean"] == 0.25
+        assert probe_metrics[
+            "free_generation_normalized_exact_match_accuracy"
+        ] == 1.0
 
 
 def test_exp3_best_checkpoint_replaces_only_on_strict_improvement(

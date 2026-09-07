@@ -25,7 +25,12 @@ from data.exp3 import (
     verify_exp3_dataset,
     verify_exp3_qa,
 )
-from evaluation.inference import evaluate_with_local_checkpoint, load_verified_qa_split
+from evaluation.inference import (
+    evaluate_with_local_checkpoint,
+    generate_prediction_records,
+    load_local_causal_lm,
+    load_verified_qa_split,
+)
 from evaluation.metrics import (
     compute_evaluation_metrics,
     compute_unordered_exact_match_metrics,
@@ -248,6 +253,174 @@ def _evaluate(
     return metrics, output_dir
 
 
+def _token_ids(tokenizer: Any, text: str) -> list[int]:
+    encoded = tokenizer(text, add_special_tokens=False, truncation=False)["input_ids"]
+    if hasattr(encoded, "tolist"):
+        encoded = encoded.tolist()
+    if encoded and isinstance(encoded[0], list):
+        encoded = encoded[0]
+    if not isinstance(encoded, list) or not all(
+        isinstance(token, int) for token in encoded
+    ):
+        raise ValueError("CPT-test tokenization did not produce integer token IDs")
+    return encoded
+
+
+def _score_cpt_answer_spans(
+    records: list[dict[str, Any]],
+    *,
+    tokenizer: Any,
+    model: Any,
+    torch_module: Any,
+    context_length: int,
+) -> list[dict[str, Any]]:
+    device = next(model.parameters()).device
+    scored: list[dict[str, Any]] = []
+    model.eval()
+    for record in records:
+        prompt = record["prompt"]
+        if not isinstance(prompt, str) or prompt != prompt.rstrip():
+            raise ValueError(
+                "Exp03 CPT-test prompts must not end in whitespace"
+            )
+        expected_continuation = f" {record['gold_answer']}"
+        if record.get("gold_continuation") != expected_continuation:
+            raise ValueError("Exp03 CPT-test gold continuation is inconsistent")
+        prompt_ids = _token_ids(tokenizer, prompt)
+        target_ids = _token_ids(tokenizer, expected_continuation)
+        combined_ids = _token_ids(tokenizer, prompt + expected_continuation)
+        if not prompt_ids or not target_ids:
+            raise ValueError("Exp03 CPT-test prompt and answer span must be non-empty")
+        if combined_ids != prompt_ids + target_ids:
+            raise ValueError("Exp03 CPT-test prompt and answer span are not token-aligned")
+        sequence_ids = prompt_ids + target_ids
+        if len(sequence_ids) > context_length:
+            raise ValueError(
+                f"CPT-test probe {record['id']} exceeds context length "
+                f"{context_length}"
+            )
+        input_ids = torch_module.tensor(
+            [sequence_ids], dtype=torch_module.long, device=device
+        )
+        with torch_module.inference_mode():
+            logits = model(
+                input_ids=input_ids,
+                attention_mask=torch_module.ones_like(input_ids),
+            ).logits[0]
+        answer_logits = logits[
+            len(prompt_ids) - 1 : len(prompt_ids) + len(target_ids) - 1
+        ].float()
+        gold_tokens = torch_module.tensor(
+            target_ids, dtype=torch_module.long, device=device
+        )
+        greedy_tokens = answer_logits.argmax(dim=-1)
+        gold_log_probabilities = torch_module.log_softmax(
+            answer_logits, dim=-1
+        ).gather(1, gold_tokens.unsqueeze(1)).squeeze(1)
+        first_logits = answer_logits[0]
+        first_gold_logit = first_logits[gold_tokens[0]]
+        first_token_rank = int(
+            (first_logits > first_gold_logit).sum().item()
+        ) + 1
+        scored.append(
+            {
+                "id": record["id"],
+                "answer_span_exact_match": bool(
+                    torch_module.equal(greedy_tokens, gold_tokens)
+                ),
+                "first_token_correct": first_token_rank == 1,
+                "gold_first_token_rank": first_token_rank,
+                "gold_answer_log_probability": float(
+                    gold_log_probabilities.sum().item()
+                ),
+                "gold_answer_nll": float(
+                    -gold_log_probabilities.mean().item()
+                ),
+                "gold_answer_token_count": len(target_ids),
+            }
+        )
+    return scored
+
+
+def _summarize_cpt_predictions(
+    predictions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    count = len(predictions)
+    if count == 0:
+        raise ValueError("cannot summarize an empty CPT-test prediction set")
+    answer_span_correct = sum(
+        bool(record["answer_span_exact_match"]) for record in predictions
+    )
+    first_token_correct = sum(
+        bool(record["first_token_correct"]) for record in predictions
+    )
+    strict_correct = sum(bool(record["strict_exact_match"]) for record in predictions)
+    normalized_correct = sum(
+        bool(record["normalized_exact_match"]) for record in predictions
+    )
+    log_probability_sum = sum(
+        record["gold_answer_log_probability"] for record in predictions
+    )
+    return {
+        "count": count,
+        "answer_span_exact_match_correct": answer_span_correct,
+        "answer_span_exact_match_accuracy": answer_span_correct / count,
+        "first_token_correct": first_token_correct,
+        "first_token_accuracy": first_token_correct / count,
+        "gold_first_token_rank_mean": sum(
+            record["gold_first_token_rank"] for record in predictions
+        )
+        / count,
+        "gold_answer_log_probability_sum": log_probability_sum,
+        "gold_answer_log_probability_mean": log_probability_sum / count,
+        "gold_answer_nll_mean": sum(
+            record["gold_answer_nll"] for record in predictions
+        )
+        / count,
+        "gold_answer_token_count": sum(
+            record["gold_answer_token_count"] for record in predictions
+        ),
+        "free_generation_strict_exact_match_correct": strict_correct,
+        "free_generation_strict_exact_match_accuracy": strict_correct / count,
+        "free_generation_normalized_exact_match_correct": normalized_correct,
+        "free_generation_normalized_exact_match_accuracy": (
+            normalized_correct / count
+        ),
+    }
+
+
+def _build_cpt_metrics(
+    predictions: list[dict[str, Any]], *, source_record_count: int
+) -> dict[str, Any]:
+    probe_counts = Counter(
+        prediction.get("probe_type") for prediction in predictions
+    )
+    if set(probe_counts) != set(CPT_TEST_PROBE_TYPES) or any(
+        probe_counts[probe_type] != source_record_count
+        for probe_type in CPT_TEST_PROBE_TYPES
+    ):
+        raise RuntimeError(
+            "CPT-test predictions do not contain one probe of each type per "
+            "source record"
+        )
+    if len(predictions) != len(CPT_TEST_PROBE_TYPES) * source_record_count:
+        raise RuntimeError("CPT-test prediction count is inconsistent")
+    return {
+        "primary_metric": "answer_span_exact_match",
+        "overall": _summarize_cpt_predictions(predictions),
+        "by_probe_type": {
+            probe_type: _summarize_cpt_predictions(
+                [
+                    prediction
+                    for prediction in predictions
+                    if prediction["probe_type"] == probe_type
+                ]
+            )
+            for probe_type in CPT_TEST_PROBE_TYPES
+        },
+    }
+
+
 def _evaluate_cpt_test(
     config: dict[str, Any],
     *,
@@ -272,39 +445,43 @@ def _evaluate_cpt_test(
         for probe in probes
     ]
     evaluation = config["evaluation"]
-    predictions, model_identity = evaluate_with_local_checkpoint(
+    tokenizer, model, torch_module = load_local_causal_lm(checkpoint)
+    answer_span_scores = _score_cpt_answer_spans(
         records,
-        checkpoint=checkpoint,
+        tokenizer=tokenizer,
+        model=model,
+        torch_module=torch_module,
+        context_length=evaluation["context_length"],
+    )
+    free_generation = generate_prediction_records(
+        records,
+        tokenizer=tokenizer,
+        model=model,
+        torch_module=torch_module,
         batch_size=evaluation["batch_size"],
         context_length=evaluation["context_length"],
         max_new_tokens=evaluation["max_new_tokens"],
+        device="cuda",
         prompt_formatter=lambda prompt: prompt,
     )
-    metrics = compute_evaluation_metrics(predictions)
-    probe_counts = Counter(
-        prediction.get("probe_type") for prediction in predictions
-    )
-    source_record_count = cpt_test_manifest["source_cpt_record_count"]
-    if set(probe_counts) != set(CPT_TEST_PROBE_TYPES) or any(
-        probe_counts[probe_type] != source_record_count
-        for probe_type in CPT_TEST_PROBE_TYPES
+    answer_span_by_id = {record["id"]: record for record in answer_span_scores}
+    free_generation_ids = {record["id"] for record in free_generation}
+    if (
+        len(answer_span_by_id) != len(answer_span_scores)
+        or len(free_generation_ids) != len(free_generation)
+        or set(answer_span_by_id) != free_generation_ids
     ):
-        raise RuntimeError(
-            "CPT-test predictions do not contain one probe of each type per "
-            "source record"
-        )
-    if len(predictions) != len(CPT_TEST_PROBE_TYPES) * source_record_count:
-        raise RuntimeError("CPT-test prediction count is inconsistent")
-    metrics["by_probe_type"] = {
-        probe_type: compute_evaluation_metrics(
-            [
-                prediction
-                for prediction in predictions
-                if prediction["probe_type"] == probe_type
-            ]
-        )["overall"]
-        for probe_type in CPT_TEST_PROBE_TYPES
-    }
+        raise RuntimeError("CPT-test answer-span and generation records differ")
+    predictions = [
+        {**record, **answer_span_by_id[record["id"]]}
+        for record in free_generation
+    ]
+    source_record_count = cpt_test_manifest["source_cpt_record_count"]
+    metrics = _build_cpt_metrics(
+        predictions, source_record_count=source_record_count
+    )
+    tokenizer_identity = getattr(tokenizer, "name_or_path", None)
+    model_identity = getattr(getattr(model, "config", None), "_name_or_path", None)
     output_dir.mkdir(parents=True)
     metadata_path = checkpoint / "training_metadata.json"
     write_jsonl(output_dir / "predictions.jsonl", predictions)
@@ -336,8 +513,15 @@ def _evaluate_cpt_test(
             "context_length": evaluation["context_length"],
             "max_new_tokens": evaluation["max_new_tokens"],
             "batch_size": evaluation["batch_size"],
-            "primary_metric": "normalized_exact_match",
-            **model_identity,
+            "primary_metric": "answer_span_exact_match",
+            "answer_span_evaluation": "teacher_forced_greedy_argmax",
+            "answer_span_target": "space_prefixed_gold_answer",
+            "secondary_diagnostics": [
+                "free_generation_strict_exact_match",
+                "free_generation_normalized_exact_match",
+            ],
+            "tokenizer_identity": tokenizer_identity or str(checkpoint.resolve()),
+            "model_identity": model_identity or str(checkpoint.resolve()),
         },
     )
     return output_dir

@@ -1,0 +1,37 @@
+{
+  "L": 28,
+  "N": 68,
+  "T": 1,
+  "answer_span_evaluation": "teacher_forced_greedy_argmax",
+  "answer_span_target": "space_prefixed_gold_answer",
+  "batch_size": 32,
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375",
+  "checkpoint_training_metadata_sha256": "0c4f102dc447ecc69b0127692b4fdfb0aa021e62fc84e5321ba6ec365b2bd66f",
+  "context_length": 256,
+  "cpt_test_manifest_sha256": "99843b4e6e4e182115a50029484d277572faab13cf58faad40fda9a64299fbea",
+  "cpt_test_method_version": "canonical_and_heldout_declarative_completion_v2",
+  "cpt_test_probe_count": 68,
+  "cpt_test_probes_sha256": "0d23a7d39fbba23ec0c4488c4244ade16d700a104b39bd3bc0d578bbf0015c3a",
+  "decoding": {
+    "do_sample": false,
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "evaluation_stage": "eval_cpt_test",
+  "experiment_name": "exp03_continent_inverse",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375",
+  "natural_language_questions": false,
+  "primary_metric": "answer_span_exact_match",
+  "prompt_format": "raw_declarative_prefix",
+  "secondary_diagnostics": [
+    "free_generation_strict_exact_match",
+    "free_generation_normalized_exact_match"
+  ],
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "test_dataset": "cpt_test",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375"
+}

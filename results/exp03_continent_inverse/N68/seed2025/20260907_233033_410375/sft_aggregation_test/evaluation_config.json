@@ -1,11 +1,11 @@
 {
-  "L": 12,
+  "L": 28,
   "N": 68,
   "T": 1,
   "additional_metric": "unordered_normalized_exact_match",
   "batch_size": 32,
-  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520_sft",
-  "checkpoint_training_metadata_sha256": "5438f777efef1f05706e5fd813cb2a6487e74471e62bfbf38f4698234588c7ad",
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375_sft",
+  "checkpoint_training_metadata_sha256": "f2dbfe72a1b8371c4f0610bb5cae7ef79b40f105c63ff3f35a5c82fb1aa24c74",
   "context_length": 256,
   "decoding": {
     "do_sample": false,
@@ -15,7 +15,7 @@
   "evaluation_stage": "eval_sft_aggregation_test",
   "experiment_name": "exp03_continent_inverse",
   "max_new_tokens": 64,
-  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520_sft",
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375_sft",
   "primary_metric": "normalized_exact_match",
   "qa_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/qa/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
   "qa_input_hashes": {
@@ -26,12 +26,12 @@
   },
   "qa_manifest_sha256": "b1a3e4627ed43d5b50deb7968e2c95e1ba8fc63bad3aa9bcf6c1b2cf9cd4cecd",
   "qa_record_count": 17,
-  "qa_split_manifest_sha256": "54944cad32dc7f70d7f1dd3beecf888fb119bfa5e16f429bdda450ff4fbae3a1",
+  "qa_split_manifest_sha256": "281c0a4cdc229c7bd98ff703684b59dc3812806635afdec6e1050aae21a3000d",
   "seed": 2025,
   "selected_tables": [
     "continent"
   ],
   "split": "test",
   "test_dataset": "aggregation_test",
-  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223345_674520_sft"
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/qwen3-0-6b-base_exp03_N68_L28_20260907_233033_410375_sft"
 }

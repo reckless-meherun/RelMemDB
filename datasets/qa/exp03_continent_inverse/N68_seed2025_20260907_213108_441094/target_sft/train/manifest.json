@@ -97,7 +97,7 @@
   "source_database_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
   "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
   "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
-  "source_evaluation_split_manifest_sha256": "54944cad32dc7f70d7f1dd3beecf888fb119bfa5e16f429bdda450ff4fbae3a1",
+  "source_evaluation_split_manifest_sha256": "281c0a4cdc229c7bd98ff703684b59dc3812806635afdec6e1050aae21a3000d",
   "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
   "split": "train",
   "zero_context": true

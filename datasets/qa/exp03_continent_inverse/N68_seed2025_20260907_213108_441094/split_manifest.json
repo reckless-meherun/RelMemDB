@@ -2,7 +2,7 @@
   "T": 1,
   "aggregation_test_manifest_sha256": "b1a3e4627ed43d5b50deb7968e2c95e1ba8fc63bad3aa9bcf6c1b2cf9cd4cecd",
   "attribute_test_manifest_sha256": "8def5ef6d67cf4320084540e2a0d27f4f1cae27ca35605ede7dc2a85a85088f5",
-  "cpt_test_manifest_sha256": "4b54671dec80c52dbca1db0236a6ac278ddb5001498fde0a8053d964a4519e38",
+  "cpt_test_manifest_sha256": "99843b4e6e4e182115a50029484d277572faab13cf58faad40fda9a64299fbea",
   "evaluation_operations": {
     "aggregation_test": "climate_band_to_continent_names",
     "attribute_test": "continent_name_to_climate_band"

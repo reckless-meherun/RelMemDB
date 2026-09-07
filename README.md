@@ -24,11 +24,13 @@ cd /home/hpc4090/meherun/relmemdb
 
 python3 scripts/run_exp03.py \
   --fact-count 68 \
-  --model gpt2 \
-  --layers 12 \
-  --base-model models/base_models/gpt2 \
+  --model qwen3-0.6b-base \
+  --layers 28 \
+  --base-model models/base_models/qwen3-0.6b-base \
   --cpt-epochs 200 \
-  --sft-epochs 200
+  --sft-epochs 200 \
+  --cpt-batch-size 32 \
+  --cpt-gradient-accumulation 1
 ```
 
 The runner reuses authenticated Exp03 dataset/QA artifacts for the same `N`

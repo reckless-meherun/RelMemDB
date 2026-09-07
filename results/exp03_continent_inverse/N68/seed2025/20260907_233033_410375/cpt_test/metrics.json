@@ -1,0 +1,53 @@
+{
+  "by_probe_type": {
+    "canonical_completion": {
+      "answer_span_exact_match_accuracy": 1.0,
+      "answer_span_exact_match_correct": 34,
+      "count": 34,
+      "first_token_accuracy": 1.0,
+      "first_token_correct": 34,
+      "free_generation_normalized_exact_match_accuracy": 0.0,
+      "free_generation_normalized_exact_match_correct": 0,
+      "free_generation_strict_exact_match_accuracy": 0.0,
+      "free_generation_strict_exact_match_correct": 0,
+      "gold_answer_log_probability_mean": -8.751042541381834e-05,
+      "gold_answer_log_probability_sum": -0.0029753544640698237,
+      "gold_answer_nll_mean": 4.1015676154476e-05,
+      "gold_answer_token_count": 80,
+      "gold_first_token_rank_mean": 1.0
+    },
+    "heldout_declarative_completion": {
+      "answer_span_exact_match_accuracy": 0.0,
+      "answer_span_exact_match_correct": 0,
+      "count": 34,
+      "first_token_accuracy": 0.0,
+      "first_token_correct": 0,
+      "free_generation_normalized_exact_match_accuracy": 0.0,
+      "free_generation_normalized_exact_match_correct": 0,
+      "free_generation_strict_exact_match_accuracy": 0.0,
+      "free_generation_strict_exact_match_correct": 0,
+      "gold_answer_log_probability_mean": -11.216437662349028,
+      "gold_answer_log_probability_sum": -381.35888051986694,
+      "gold_answer_nll_mean": 5.447722442009869,
+      "gold_answer_token_count": 80,
+      "gold_first_token_rank_mean": 9.411764705882353
+    }
+  },
+  "overall": {
+    "answer_span_exact_match_accuracy": 0.5,
+    "answer_span_exact_match_correct": 34,
+    "count": 68,
+    "first_token_accuracy": 0.5,
+    "first_token_correct": 34,
+    "free_generation_normalized_exact_match_accuracy": 0.0,
+    "free_generation_normalized_exact_match_correct": 0,
+    "free_generation_strict_exact_match_accuracy": 0.0,
+    "free_generation_strict_exact_match_correct": 0,
+    "gold_answer_log_probability_mean": -5.60826258638722,
+    "gold_answer_log_probability_sum": -381.361855874331,
+    "gold_answer_nll_mean": 2.723881728843012,
+    "gold_answer_token_count": 160,
+    "gold_first_token_rank_mean": 5.205882352941177
+  },
+  "primary_metric": "answer_span_exact_match"
+}

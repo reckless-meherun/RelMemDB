@@ -16,6 +16,7 @@ from utils.io import read_json, read_jsonl, write_json, write_jsonl
 
 CPT_TEST_FORMAT_VERSION = 1
 CPT_TEST_METHOD_VERSION = "canonical_and_heldout_declarative_completion_v1"
+EXP3_CPT_TEST_METHOD_VERSION = "canonical_and_heldout_declarative_completion_v2"
 CPT_TEST_PROBE_TYPES = ("canonical_completion", "heldout_declarative_completion")
 SUPPORTED_EXPERIMENTS = frozenset(
     {"exp02_capacity_boundary", "exp03_continent_inverse"}
@@ -40,7 +41,11 @@ def _assert_isolated_probe(prompt: str, source_fact: str) -> None:
 
 
 def build_exp2_cpt_test_probes(
-    cpt_records: list[dict[str, Any]], *, seed: int
+    cpt_records: list[dict[str, Any]],
+    *,
+    seed: int,
+    method_version: str = CPT_TEST_METHOD_VERSION,
+    token_aligned_answer_span: bool = False,
 ) -> list[dict[str, Any]]:
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise ValueError("seed must be a non-negative integer")
@@ -54,37 +59,42 @@ def build_exp2_cpt_test_probes(
         ):
             prompt = source_record[prompt_field]
             gold_answer = source_record["gold_answer"]
+            gold_continuation = gold_answer
+            if token_aligned_answer_span:
+                prompt = prompt.rstrip()
+                gold_continuation = f" {gold_answer}"
             _assert_isolated_probe(prompt, source_fact)
             if probe_type == "canonical_completion":
-                if not source_fact.startswith(prompt + gold_answer):
+                if not source_fact.startswith(prompt + gold_continuation):
                     raise RuntimeError(
                         "canonical CPT-test prompt is not a source-record prefix"
                     )
             else:
-                held_out_statement = f"{prompt}{gold_answer}."
+                held_out_statement = f"{prompt}{gold_continuation}."
                 if held_out_statement == source_fact:
                     raise RuntimeError(
                         "held-out CPT-test template duplicates its training template"
                     )
             identity = {
-                "method_version": CPT_TEST_METHOD_VERSION,
+                "method_version": method_version,
                 "seed": seed,
                 "source_record_id": source_id,
                 "probe_type": probe_type,
             }
-            probes.append(
-                {
-                    "id": f"cpt_probe_{hash_json_object(identity)[:32]}",
-                    "probe_type": probe_type,
-                    "entity": source_record["entity"],
-                    "attribute": source_record["attribute"],
-                    "prompt": prompt,
-                    "gold_answer": gold_answer,
-                    "source_fact": source_fact,
-                    "source_fact_sha256": hash_text(source_fact),
-                    "source_cpt_record_id": source_id,
-                }
-            )
+            probe = {
+                "id": f"cpt_probe_{hash_json_object(identity)[:32]}",
+                "probe_type": probe_type,
+                "entity": source_record["entity"],
+                "attribute": source_record["attribute"],
+                "prompt": prompt,
+                "gold_answer": gold_answer,
+                "source_fact": source_fact,
+                "source_fact_sha256": hash_text(source_fact),
+                "source_cpt_record_id": source_id,
+            }
+            if token_aligned_answer_span:
+                probe["gold_continuation"] = gold_continuation
+            probes.append(probe)
     counts = Counter(probe["source_cpt_record_id"] for probe in probes)
     if set(counts) != {record["id"] for record in cpt_records} or any(
         count != len(CPT_TEST_PROBE_TYPES) for count in counts.values()
@@ -165,13 +175,22 @@ def generate_cpt_test(
         raise ValueError("CPT records do not match the authenticated CPT manifest")
 
     seed = config["experiment"]["seed"]
-    probes = build_exp2_cpt_test_probes(cpt_records, seed=seed)
+    is_exp3 = experiment_name == "exp03_continent_inverse"
+    method_version = (
+        EXP3_CPT_TEST_METHOD_VERSION if is_exp3 else CPT_TEST_METHOD_VERSION
+    )
+    probes = build_exp2_cpt_test_probes(
+        cpt_records,
+        seed=seed,
+        method_version=method_version,
+        token_aligned_answer_span=is_exp3,
+    )
     probes_path = output_dir / "probes.jsonl"
     write_jsonl(probes_path, probes)
     manifest = {
         "format_version": CPT_TEST_FORMAT_VERSION,
         "experiment_name": experiment_name,
-        "method_version": CPT_TEST_METHOD_VERSION,
+        "method_version": method_version,
         "seed": seed,
         "T": condition["T"],
         "N": condition["N"],
@@ -204,6 +223,13 @@ def generate_cpt_test(
         "natural_language_questions": False,
         "deterministic_generation": True,
     }
+    if is_exp3:
+        manifest.update(
+            {
+                "answer_span_target_prefix": " ",
+                "prompt_terminal_whitespace": False,
+            }
+        )
     write_json(output_dir / "manifest.json", manifest)
     return {"output_dir": output_dir, "manifest": manifest, "probes": probes}
 
@@ -243,10 +269,14 @@ def verify_cpt_test(
     )
     source_by_id = {record["id"]: record for record in cpt_records}
     cpt_manifest = read_json(condition["cpt_manifest"])
+    is_exp3 = experiment_name == "exp03_continent_inverse"
+    method_version = (
+        EXP3_CPT_TEST_METHOD_VERSION if is_exp3 else CPT_TEST_METHOD_VERSION
+    )
     expected = {
         "format_version": CPT_TEST_FORMAT_VERSION,
         "experiment_name": experiment_name,
-        "method_version": CPT_TEST_METHOD_VERSION,
+        "method_version": method_version,
         "seed": condition["manifest"]["seed"],
         "T": condition["T"],
         "N": condition["N"],
@@ -281,6 +311,13 @@ def verify_cpt_test(
         "natural_language_questions": False,
         "deterministic_generation": True,
     }
+    if is_exp3:
+        expected.update(
+            {
+                "answer_span_target_prefix": " ",
+                "prompt_terminal_whitespace": False,
+            }
+        )
     for field, expected_value in expected.items():
         if manifest.get(field) != expected_value:
             raise ValueError(f"CPT-test manifest {field} is inconsistent")
@@ -309,8 +346,14 @@ def verify_cpt_test(
             if probe_type == "canonical_completion"
             else "held_out_prompt"
         )
+        expected_prompt = (
+            source[prompt_field].rstrip() if is_exp3 else source[prompt_field]
+        )
+        expected_continuation = (
+            f" {source['gold_answer']}" if is_exp3 else source["gold_answer"]
+        )
         identity = {
-            "method_version": CPT_TEST_METHOD_VERSION,
+            "method_version": method_version,
             "seed": manifest.get("seed"),
             "source_record_id": source["id"],
             "probe_type": probe_type,
@@ -319,10 +362,14 @@ def verify_cpt_test(
             probe.get("id") != f"cpt_probe_{hash_json_object(identity)[:32]}"
             or probe.get("entity") != source["entity"]
             or probe.get("attribute") != source["attribute"]
-            or probe.get("prompt") != source[prompt_field]
+            or probe.get("prompt") != expected_prompt
             or probe.get("source_fact") != source["text"]
             or probe.get("source_fact_sha256") != hash_text(source["text"])
             or probe.get("gold_answer") != source["gold_answer"]
+            or (
+                is_exp3
+                and probe.get("gold_continuation") != expected_continuation
+            )
         ):
             raise ValueError("CPT-test probe source-fact provenance is inconsistent")
         _assert_isolated_probe(probe["prompt"], probe["source_fact"])
