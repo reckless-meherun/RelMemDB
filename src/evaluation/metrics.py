@@ -25,6 +25,39 @@ def normalized_exact_match(prediction: str, gold_answer: str) -> bool:
     return normalize_answer(prediction) == normalize_answer(gold_answer)
 
 
+def unordered_normalized_exact_match(prediction: str, gold_answer: str) -> bool:
+    """Compare comma-delimited answers after per-item normalization as multisets."""
+    if not isinstance(prediction, str) or not isinstance(gold_answer, str):
+        raise TypeError("prediction and gold answer must be strings")
+
+    def items(value: str) -> Counter[str]:
+        return Counter(normalize_answer(item.strip()) for item in value.split(","))
+
+    return items(prediction) == items(gold_answer)
+
+
+def compute_unordered_exact_match_metrics(
+    prediction_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Return Exp03's opt-in unordered EM and annotate its prediction records."""
+    if not prediction_records:
+        raise ValueError("cannot compute metrics for an empty prediction set")
+    correct = 0
+    for record in prediction_records:
+        prediction = record.get("prediction")
+        gold_answer = record.get("gold_answer")
+        if not isinstance(prediction, str) or not isinstance(gold_answer, str):
+            raise TypeError("prediction records must contain text answers")
+        matched = unordered_normalized_exact_match(prediction, gold_answer)
+        record["unordered_normalized_exact_match"] = matched
+        correct += matched
+    return {
+        "unordered_normalized_exact_match_correct": correct,
+        "unordered_normalized_exact_match_accuracy": correct
+        / len(prediction_records),
+    }
+
+
 def score_prediction(
     qa_record: dict[str, Any], raw_generation: str, prediction: str
 ) -> dict[str, Any]:

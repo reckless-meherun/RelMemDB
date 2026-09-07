@@ -2,10 +2,37 @@
 
 RelMemDB studies whether language models can **internalize a relational database** and answer natural-language questions directly from model parameters, without SQL generation, database execution, retrieval, or database access at inference time.
 
-This repository contains two experiments:
+This repository contains three experiments:
 
 - **Experiment 1** — the original fixed T/N/L feasibility study.
 - **Experiment 2** — the current capacity-boundary study with flexible table selection, fact count, model, and layer depth.
+- **Experiment 3** — a standalone `continent` study with forward attribute SFT and inverse aggregation testing.
+
+---
+
+# Experiment 3
+
+Experiment 3 keeps the Experiment-2 CPT and final-epoch SFT behavior, but uses
+only the canonical `continent(continent_id, continent_name, climate_band)`
+table. Each row contributes two semantic facts, so `N` must be even. The fixed
+17-label climate vocabulary supports at most 34 rows (`N <= 68`).
+
+From the repository root, run:
+
+```bash
+python3 scripts/run_exp03.py \
+  --fact-count 10 \
+  --model gpt2 \
+  --layers 12 \
+  --base-model models/base_models/gpt2 \
+  --cpt-epochs 20 \
+  --sft-epochs 10
+```
+
+The runner reuses authenticated Exp03 dataset/QA artifacts for the same `N`
+and seed, evaluates both ordinary normalized EM and unordered normalized EM,
+and retains the strictly best ordinary-EM final SFT checkpoint for each
+`N`/seed/model/layer condition.
 
 ---
 

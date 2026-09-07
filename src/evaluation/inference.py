@@ -2,6 +2,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+from config import FINAL_EPOCH_EXPERIMENTS
 from evaluation.metrics import score_prediction
 from utils.hashing import hash_file
 from utils.io import read_json, read_jsonl
@@ -120,7 +121,7 @@ def load_verified_qa_split(
             split_dir / f"{hop_name}.jsonl",
             hop_name,
             allow_empty=(
-                root_manifest.get("experiment_name") == "exp02_capacity_boundary"
+                root_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS
                 and counts.get(hop_name, {}).get("final_retained_count") == 0
             ),
         )

@@ -15,6 +15,7 @@ from data.serialize import (
     SERIALIZATION_STYLE,
     build_selected_cpt_records,
 )
+from config import uses_exp2_training_behavior
 from experiment import configured_model_layers, verify_checkpoint_layers
 from training.checkpoint_retention import (
     remove_exp2_trained_checkpoints_except,
@@ -64,7 +65,10 @@ def verify_cpt_artifacts(
 
     database_manifest = read_json(database_manifest_path)
     cpt_manifest = read_json(cpt_manifest_path)
-    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    is_exp2 = database_manifest.get("experiment_mode") in {
+        "selected_canonical_tables",
+        "standalone_canonical_table",
+    }
     if is_exp2:
         if train_text_path is not None and Path(train_text_path).exists():
             raise CPTArtifactError("Experiment-2 must not contain CPT train.txt")
@@ -491,7 +495,7 @@ def build_cpt_training_plan(
             raise ValueError(f"training.{key} must be {qualifier}")
         return numeric_value
 
-    is_exp2 = config.get("experiment", {}).get("name") == "exp02_capacity_boundary"
+    is_exp2 = uses_exp2_training_behavior(config)
     fact_exposure = None if is_exp2 else positive_int("fact_exposure")
     batch_size = positive_int("cpt_batch_size")
     epochs = positive_int("cpt_epochs")
@@ -669,12 +673,14 @@ def _build_adamw_optimizer(
     return optimizer, actually_used, None
 
 
-def _create_exp2_cpt_progress_bar(plan: dict[str, Any]) -> Any:
+def _create_exp2_cpt_progress_bar(
+    plan: dict[str, Any], *, experiment_label: str = "Exp02"
+) -> Any:
     from tqdm.auto import tqdm
 
     progress = tqdm(
         total=plan["epochs"],
-        desc=f"Exp02 CPT epoch 0/{plan['epochs']}",
+        desc=f"{experiment_label} CPT epoch 0/{plan['epochs']}",
         unit="epoch",
         dynamic_ncols=True,
         leave=True,
@@ -773,8 +779,9 @@ def run_cpt_training(
     )
     started = time.perf_counter()
     model, tokenizer = _load_model_and_tokenizer(source_checkpoint)
+    uses_independent_records = uses_exp2_training_behavior(config)
     is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
-    if is_exp2:
+    if uses_independent_records:
         database_manifest = read_json(database_manifest_path)
         cpt_records, record_metadata = build_selected_cpt_records(
             database_path, database_manifest
@@ -873,7 +880,7 @@ def run_cpt_training(
                 collate_independent_cpt_examples,
                 pad_token_id=tokenizer.pad_token_id,
             )
-            if is_exp2
+            if uses_independent_records
             else collate_cpt_examples
         ),
         pin_memory=plan["pin_memory"],
@@ -930,7 +937,7 @@ def run_cpt_training(
         "tokenization": token_statistics,
         "training": plan,
     }
-    if is_exp2:
+    if uses_independent_records:
         run_record["stage"] = "cpt"
         run_record.update(
             {
@@ -966,7 +973,12 @@ def run_cpt_training(
     }.get(plan["precision"])
     scaler = torch.amp.GradScaler("cuda", enabled=plan["precision"] == "fp16")
     optimizer.zero_grad(set_to_none=True)
-    progress_bar = _create_exp2_cpt_progress_bar(plan) if is_exp2 else None
+    experiment_label = "Exp02" if is_exp2 else "Exp03"
+    progress_bar = (
+        _create_exp2_cpt_progress_bar(plan, experiment_label=experiment_label)
+        if uses_independent_records
+        else None
+    )
     displayed_epoch = 0
     try:
         for epoch, micro_batch_in_epoch, batch in _iterate_cpt_batches(
@@ -974,7 +986,7 @@ def run_cpt_training(
         ):
             if progress_bar is not None and epoch != displayed_epoch:
                 progress_bar.set_description(
-                    f"Exp02 CPT epoch {epoch}/{plan['epochs']}"
+                    f"{experiment_label} CPT epoch {epoch}/{plan['epochs']}"
                 )
                 displayed_epoch = epoch
             batch = {
@@ -1068,9 +1080,11 @@ def run_cpt_training(
         raise RuntimeError(
             "CPT training did not consume every supervised token once per epoch"
         )
-    if is_exp2 and observed_sequences != token_statistics["sequence_count"] * plan[
-        "epochs"
-    ]:
+    if (
+        uses_independent_records
+        and observed_sequences
+        != token_statistics["sequence_count"] * plan["epochs"]
+    ):
         raise RuntimeError(
             "Experiment-2 CPT did not consume every independent record once per epoch"
         )
@@ -1101,7 +1115,7 @@ def run_cpt_training(
         "runtime_seconds": runtime_seconds,
         "peak_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
     }
-    if is_exp2:
+    if uses_independent_records:
         summary.update(
             {
                 "completed_cpt_epochs": plan["epochs"],

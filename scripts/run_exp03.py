@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""Run Experiment 3 using Experiment 2's CPT/SFT/evaluation behavior."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from config import EXP03_NAME, load_config, validate_config
+from data.exp3 import (
+    generate_exp3_qa,
+    materialize_exp3_dataset,
+    validate_exp3_fact_count,
+    verify_exp3_dataset,
+    verify_exp3_qa,
+)
+from evaluation.inference import evaluate_with_local_checkpoint, load_verified_qa_split
+from evaluation.metrics import (
+    compute_evaluation_metrics,
+    compute_unordered_exact_match_metrics,
+)
+from experiment import (
+    apply_checkpoint_model_config,
+    resolve_model_checkpoint,
+    verify_checkpoint_layers,
+)
+from training.checkpoint_retention import retain_best_exp3_checkpoint
+from training.cpt import run_cpt_training
+from training.target_sft import run_target_sft_training
+from utils.hashing import hash_file
+from utils.io import write_json, write_jsonl, write_yaml
+from utils.paths import safe_component
+
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "exp03_continent_inverse.yaml"
+DATASET_ROOT = PROJECT_ROOT / "datasets" / "generated_databases" / EXP03_NAME
+QA_ROOT = PROJECT_ROOT / "datasets" / "qa" / EXP03_NAME
+RUN_ROOT = PROJECT_ROOT / "runs" / EXP03_NAME
+RESULT_ROOT = PROJECT_ROOT / "results" / EXP03_NAME
+TRAINED_MODELS_ROOT = PROJECT_ROOT / "models" / "trained_models"
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run RelMemDB Experiment 3: standalone continent CPT, "
+            "continent-to-climate SFT, and inverse aggregation evaluation."
+        )
+    )
+    parser.add_argument("--fact-count", required=True, type=_positive_int)
+    parser.add_argument("--model", default="gpt2")
+    parser.add_argument("--layers", type=_positive_int)
+    parser.add_argument("--base-model", type=Path)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--cpt-epochs", type=_positive_int)
+    parser.add_argument("--sft-epochs", type=_positive_int)
+    parser.add_argument("--cpt-batch-size", type=_positive_int)
+    parser.add_argument("--cpt-gradient-accumulation", type=_positive_int)
+    parser.add_argument("--sft-batch-size", type=_positive_int)
+    parser.add_argument("--sft-gradient-accumulation", type=_positive_int)
+    parser.add_argument("--cpt-learning-rate", type=_positive_float)
+    parser.add_argument("--sft-learning-rate", type=_positive_float)
+    return parser.parse_args()
+
+
+def _resolved_config(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
+    config = copy.deepcopy(load_config(args.config.resolve()))
+    if config["experiment"]["name"] != EXP03_NAME:
+        raise ValueError(f"Experiment-3 runner requires experiment.name={EXP03_NAME}")
+    if args.seed is not None:
+        if args.seed < 0:
+            raise ValueError("--seed must be non-negative")
+        config["experiment"]["seed"] = args.seed
+    base_model, native_layers = resolve_model_checkpoint(
+        args.model, source_checkpoint=args.base_model
+    )
+    apply_checkpoint_model_config(config, model_name=args.model, checkpoint=base_model)
+    layers = native_layers if args.layers is None else args.layers
+    verify_checkpoint_layers(base_model, layers)
+    overrides = {
+        "cpt_epochs": ("training", "cpt_epochs", args.cpt_epochs),
+        "sft_epochs": ("target_sft", "epochs", args.sft_epochs),
+        "cpt_batch_size": ("training", "cpt_batch_size", args.cpt_batch_size),
+        "cpt_gradient_accumulation": (
+            "training",
+            "gradient_accumulation_steps",
+            args.cpt_gradient_accumulation,
+        ),
+        "sft_batch_size": ("target_sft", "batch_size", args.sft_batch_size),
+        "sft_gradient_accumulation": (
+            "target_sft",
+            "gradient_accumulation_steps",
+            args.sft_gradient_accumulation,
+        ),
+        "cpt_learning_rate": (
+            "training",
+            "learning_rate",
+            args.cpt_learning_rate,
+        ),
+        "sft_learning_rate": (
+            "target_sft",
+            "learning_rate",
+            args.sft_learning_rate,
+        ),
+    }
+    for _, (section, key, value) in overrides.items():
+        if value is not None:
+            config[section][key] = value
+    config["_runtime"] = {"run_timestamp": run_dir.name}
+    validate_config(config)
+    write_yaml(run_dir / "resolved_config.yaml", config)
+    config["_base_model"] = base_model
+    config["_layers"] = layers
+    return config
+
+
+def _find_dataset(fact_count: int, seed: int) -> dict[str, Any] | None:
+    if not DATASET_ROOT.is_dir():
+        return None
+    for candidate in sorted(DATASET_ROOT.iterdir(), key=lambda path: path.name):
+        if not candidate.is_dir():
+            continue
+        try:
+            return verify_exp3_dataset(candidate, fact_count=fact_count, seed=seed)
+        except (OSError, TypeError, ValueError, KeyError):
+            continue
+    return None
+
+
+def _find_qa(
+    dataset: dict[str, Any], *, fact_count: int, seed: int
+) -> dict[str, Any] | None:
+    if not QA_ROOT.is_dir():
+        return None
+    for candidate in sorted(QA_ROOT.iterdir(), key=lambda path: path.name):
+        if not candidate.is_dir():
+            continue
+        try:
+            return verify_exp3_qa(
+                candidate,
+                dataset_dir=dataset["root"],
+                fact_count=fact_count,
+                seed=seed,
+            )
+        except (OSError, TypeError, ValueError, KeyError):
+            continue
+    return None
+
+
+def _evaluate(
+    config: dict[str, Any],
+    *,
+    checkpoint: Path,
+    qa_root: Path,
+    split: str,
+    output_dir: Path,
+    stage: str,
+    fact_count: int,
+    layers: int,
+) -> tuple[dict[str, Any], Path]:
+    records, provenance = load_verified_qa_split(
+        qa_root / split,
+        split=split,
+        expected_table_count=1,
+        expected_fact_count=fact_count,
+    )
+    evaluation = config["evaluation"]
+    predictions, model_identity = evaluate_with_local_checkpoint(
+        records,
+        checkpoint=checkpoint,
+        batch_size=evaluation["batch_size"],
+        context_length=evaluation["context_length"],
+        max_new_tokens=evaluation["max_new_tokens"],
+    )
+    metrics = compute_evaluation_metrics(predictions)
+    metrics["unordered_exact_match"] = compute_unordered_exact_match_metrics(
+        predictions
+    )
+    output_dir.mkdir(parents=True)
+    metadata_path = checkpoint / "training_metadata.json"
+    evaluation_config = {
+        "experiment_name": EXP03_NAME,
+        "evaluation_stage": stage,
+        "T": 1,
+        "N": fact_count,
+        "L": layers,
+        "seed": config["experiment"]["seed"],
+        "selected_tables": ["continent"],
+        "split": split,
+        "qa_data_dir": str(qa_root),
+        "qa_record_count": len(records),
+        "qa_manifest_sha256": provenance["qa_manifest_sha256"],
+        "qa_split_manifest_sha256": provenance["qa_split_manifest_sha256"],
+        "qa_input_hashes": provenance["input_hashes"],
+        "checkpoint_path": str(checkpoint),
+        "checkpoint_training_metadata_sha256": (
+            hash_file(metadata_path) if metadata_path.is_file() else None
+        ),
+        "decoding": {"strategy": "greedy", "do_sample": False, "temperature": None},
+        "context_length": evaluation["context_length"],
+        "max_new_tokens": evaluation["max_new_tokens"],
+        "batch_size": evaluation["batch_size"],
+        "primary_metric": "normalized_exact_match",
+        "additional_metric": "unordered_normalized_exact_match",
+        **model_identity,
+    }
+    write_jsonl(output_dir / "predictions.jsonl", predictions)
+    write_json(output_dir / "metrics.json", metrics)
+    write_json(output_dir / "evaluation_config.json", evaluation_config)
+    return metrics, output_dir
+
+
+def main() -> None:
+    args = _parse_args()
+    validate_exp3_fact_count(args.fact_count)
+    timestamp = _timestamp()
+    run_dir = RUN_ROOT / "pipeline_runs" / timestamp
+    run_dir.mkdir(parents=True)
+    state_path = run_dir / "pipeline_state.json"
+    state: dict[str, Any] = {
+        "experiment_name": EXP03_NAME,
+        "status": "running",
+        "created_at": _utc_iso(),
+        "N": args.fact_count,
+    }
+    write_json(state_path, state)
+    try:
+        config = _resolved_config(args, run_dir)
+        seed = config["experiment"]["seed"]
+        layers = config.pop("_layers")
+        base_model = config.pop("_base_model")
+
+        dataset = _find_dataset(args.fact_count, seed)
+        if dataset is None:
+            dataset_dir = DATASET_ROOT / f"N{args.fact_count}_seed{seed}_{timestamp}"
+            materialize_exp3_dataset(config, dataset_dir, fact_count=args.fact_count)
+            dataset = verify_exp3_dataset(
+                dataset_dir, fact_count=args.fact_count, seed=seed
+            )
+        state["dataset_path"] = str(dataset["root"])
+        write_json(state_path, state)
+
+        qa = _find_qa(dataset, fact_count=args.fact_count, seed=seed)
+        if qa is None:
+            qa_dir = QA_ROOT / dataset["root"].name
+            generate_exp3_qa(
+                dataset["root"], qa_dir, fact_count=args.fact_count, seed=seed
+            )
+            qa = verify_exp3_qa(
+                qa_dir,
+                dataset_dir=dataset["root"],
+                fact_count=args.fact_count,
+                seed=seed,
+            )
+        state["qa_path"] = str(qa["root"])
+        write_json(state_path, state)
+
+        model_component = safe_component(args.model)
+        stem = f"{model_component}_exp03_N{args.fact_count}_L{layers}_{timestamp}"
+        cpt_checkpoint = TRAINED_MODELS_ROOT / stem
+        cpt_summary = run_cpt_training(
+            config,
+            table_count=1,
+            fact_count=args.fact_count,
+            layers=layers,
+            source_checkpoint=base_model,
+            output_checkpoint=cpt_checkpoint,
+            run_config_path=run_dir / "cpt" / "run_config.yaml",
+            train_log_path=run_dir / "cpt" / "train_log.jsonl",
+            database_path=dataset["database"],
+            database_manifest_path=dataset["manifest_path"],
+            readable_book_path=dataset["cpt_dir"] / "book_readable.txt",
+            train_text_path=None,
+            cpt_manifest_path=dataset["cpt_manifest"],
+        )
+        if cpt_summary.get("experiment") != EXP03_NAME:
+            raise RuntimeError("CPT checkpoint has the wrong experiment identity")
+        state["cpt_checkpoint_path"] = str(cpt_checkpoint)
+
+        condition_results = RESULT_ROOT / f"N{args.fact_count}" / f"seed{seed}" / timestamp
+        _, cpt_validation = _evaluate(
+            config,
+            checkpoint=cpt_checkpoint,
+            qa_root=qa["root"],
+            split="validation",
+            output_dir=condition_results / "cpt_validation",
+            stage="eval_cpt",
+            fact_count=args.fact_count,
+            layers=layers,
+        )
+        state["cpt_validation_result_path"] = str(cpt_validation)
+        write_json(state_path, state)
+
+        sft_checkpoint = TRAINED_MODELS_ROOT / f"{stem}_sft"
+        sft_summary = run_target_sft_training(
+            config,
+            table_count=1,
+            fact_count=args.fact_count,
+            layers=layers,
+            source_checkpoint=cpt_checkpoint,
+            output_checkpoint=sft_checkpoint,
+            run_config_path=run_dir / "target_sft" / "run_config.yaml",
+            train_log_path=run_dir / "target_sft" / "train_log.jsonl",
+            qa_condition_dir=qa["root"],
+        )
+        if sft_summary.get("experiment") != EXP03_NAME:
+            raise RuntimeError("SFT checkpoint has the wrong experiment identity")
+        state["sft_checkpoint_path"] = str(sft_checkpoint)
+
+        _, sft_validation = _evaluate(
+            config,
+            checkpoint=sft_checkpoint,
+            qa_root=qa["root"],
+            split="validation",
+            output_dir=condition_results / "sft_validation",
+            stage="eval_sft",
+            fact_count=args.fact_count,
+            layers=layers,
+        )
+        test_metrics, sft_test = _evaluate(
+            config,
+            checkpoint=sft_checkpoint,
+            qa_root=qa["root"],
+            split="test",
+            output_dir=condition_results / "sft_test",
+            stage="eval_sft",
+            fact_count=args.fact_count,
+            layers=layers,
+        )
+        em = test_metrics["overall"]["normalized_exact_match_accuracy"]
+        best_checkpoint = (
+            TRAINED_MODELS_ROOT
+            / "exp03_best"
+            / model_component
+            / f"N{args.fact_count}_L{layers}_seed{seed}"
+            / "checkpoint"
+        )
+        best_metadata = {
+            "experiment": EXP03_NAME,
+            "N": args.fact_count,
+            "model": args.model,
+            "layers": layers,
+            "epochs": config["target_sft"]["epochs"],
+            "cpt_epochs": config["training"]["cpt_epochs"],
+            "seed": seed,
+            "EM": em,
+            "checkpoint_source": str(sft_checkpoint),
+            "run": str(run_dir),
+            "evaluation_result": str(sft_test),
+        }
+        improved = retain_best_exp3_checkpoint(
+            sft_checkpoint, best_checkpoint, best_metadata
+        )
+        state.update(
+            {
+                "sft_validation_result_path": str(sft_validation),
+                "sft_test_result_path": str(sft_test),
+                "best_checkpoint_path": str(best_checkpoint),
+                "best_checkpoint_updated": improved,
+                "test_normalized_exact_match": em,
+                "test_unordered_exact_match": test_metrics[
+                    "unordered_exact_match"
+                ]["unordered_normalized_exact_match_accuracy"],
+                "status": "completed",
+                "completed_at": _utc_iso(),
+            }
+        )
+        write_json(state_path, state)
+    except Exception as exc:
+        state.update(
+            {
+                "status": "failed",
+                "failure": {"type": type(exc).__name__, "message": str(exc)},
+            }
+        )
+        write_json(state_path, state)
+        raise
+
+    print("Experiment 3 complete")
+    print(f"Dataset: {state['dataset_path']}")
+    print(f"QA: {state['qa_path']}")
+    print(f"SFT checkpoint: {state['sft_checkpoint_path']}")
+    print(f"Test result: {state['sft_test_result_path']}")
+    print(f"Best checkpoint: {state['best_checkpoint_path']}")
+    print(f"Best checkpoint updated: {state['best_checkpoint_updated']}")
+    print(f"Run state: {state_path}")
+
+
+if __name__ == "__main__":
+    main()

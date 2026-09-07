@@ -238,7 +238,13 @@ def _validated_position_partition(
     ):
         raise ValueError("database manifest position partition is invalid")
     flattened = [position for group in partition for position in group]
-    if flattened != list(range(len(SEMANTIC_ENTITY_SPECS))):
+    expected_positions = (
+        database_manifest.get("selected_positions")
+        if database_manifest.get("experiment_mode")
+        == "standalone_canonical_table"
+        else list(range(len(SEMANTIC_ENTITY_SPECS)))
+    )
+    if flattened != expected_positions:
         raise ValueError("database manifest position partition is incomplete")
     return partition
 
@@ -257,8 +263,9 @@ def _read_logical_entities(
         raise ValueError("physical database tables do not match the manifest partition")
 
     physical_groups: list[dict[str, Any]] = []
+    available_positions = [position for group in partition for position in group]
     entities_by_position: dict[int, dict[str, dict[str, Any]]] = {
-        position: {} for position in range(len(SEMANTIC_ENTITY_SPECS))
+        position: {} for position in available_positions
     }
     seen_identifiers: set[str] = set()
     physical_row_count = 0
@@ -391,7 +398,8 @@ def _possessive(value: str) -> str:
 def _assign_natural_anchors(
     entities_by_position: dict[int, dict[str, dict[str, Any]]],
 ) -> None:
-    for position, spec in enumerate(SEMANTIC_ENTITY_SPECS):
+    for position in sorted(entities_by_position):
+        spec = SEMANTIC_ENTITY_SPECS[position]
         entity_type = spec["entity_type"]
         anchors: set[str] = set()
         for entity in entities_by_position[position].values():
@@ -474,7 +482,7 @@ def _expected_facts(
     entities_by_position: dict[int, dict[str, dict[str, Any]]],
 ) -> list[tuple[str, ...]]:
     facts: list[tuple[str, ...]] = []
-    for position in range(len(SEMANTIC_ENTITY_SPECS)):
+    for position in sorted(entities_by_position):
         for entity in entities_by_position[position].values():
             facts.extend(
                 _attribute_fact(entity, field) for field in entity["attributes"]
@@ -1015,7 +1023,10 @@ def serialize_database_cpt(
             f"N={expected_logical_fact_count}"
         )
 
-    is_exp2 = database_manifest.get("experiment_mode") == "selected_canonical_tables"
+    is_exp2 = database_manifest.get("experiment_mode") in {
+        "selected_canonical_tables",
+        "standalone_canonical_table",
+    }
     if is_exp2 and train_text_path is not None and train_text_path.exists():
         raise FileExistsError(
             f"Experiment-2 CPT must not contain train.txt: {train_text_path}"

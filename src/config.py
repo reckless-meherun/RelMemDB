@@ -21,6 +21,13 @@ REQUIRED_SECTIONS = {
 }
 
 EXP02_NAME = "exp02_capacity_boundary"
+EXP03_NAME = "exp03_continent_inverse"
+FINAL_EPOCH_EXPERIMENTS = frozenset({EXP02_NAME, EXP03_NAME})
+
+
+def uses_exp2_training_behavior(config: dict[str, Any]) -> bool:
+    """Whether an experiment uses Exp02's final-epoch, no-dev training flow."""
+    return config.get("experiment", {}).get("name") in FINAL_EPOCH_EXPERIMENTS
 
 
 class ConfigError(ValueError):
@@ -72,8 +79,11 @@ def _required(section: dict[str, Any], key: str, section_name: str) -> Any:
 
 def validate_config(config: dict[str, Any]) -> None:
     experiment_value = config.get("experiment")
-    if isinstance(experiment_value, dict) and experiment_value.get("name") == EXP02_NAME:
-        _validate_exp02_config(config)
+    experiment_name = (
+        experiment_value.get("name") if isinstance(experiment_value, dict) else None
+    )
+    if experiment_name in FINAL_EPOCH_EXPERIMENTS:
+        _validate_exp02_style_config(config, expected_name=experiment_name)
         return
     missing = sorted(REQUIRED_SECTIONS - config.keys())
     if missing:
@@ -610,8 +620,10 @@ def validate_config(config: dict[str, Any]) -> None:
     )
 
 
-def _validate_exp02_config(config: dict[str, Any]) -> None:
-    """Validate Exp2 without importing Exp1's fixed T/N sweep assumptions."""
+def _validate_exp02_style_config(
+    config: dict[str, Any], *, expected_name: str
+) -> None:
+    """Validate the shared Exp02/Exp03 training and evaluation settings."""
     required = {"experiment", "model", "data", "training", "target_sft", "evaluation"}
     missing = sorted(required - config.keys())
     if missing:
@@ -622,8 +634,8 @@ def _validate_exp02_config(config: dict[str, Any]) -> None:
     training = _require_mapping(config["training"], "training")
     target_sft = _require_mapping(config["target_sft"], "target_sft")
     evaluation = _require_mapping(config["evaluation"], "evaluation")
-    if experiment.get("name") != EXP02_NAME:
-        raise ConfigError(f"experiment.name must be {EXP02_NAME}")
+    if experiment.get("name") != expected_name:
+        raise ConfigError(f"experiment.name must be {expected_name}")
     _require_non_negative_int(_required(experiment, "seed", "experiment"), "experiment.seed")
     for key in ("name", "precision"):
         value = _required(model, key, "model")
@@ -632,31 +644,50 @@ def _validate_exp02_config(config: dict[str, Any]) -> None:
     for key in ("native_layers", "hidden_size", "attention_heads", "context_length"):
         _require_positive_int(_required(model, key, "model"), f"model.{key}")
     if "t_sweep" in data or "n_sweep" in data:
-        raise ConfigError("Experiment 2 must not define fixed T or N sweep arrays")
-    if data.get("schema_topology") != "chain":
-        raise ConfigError("data.schema_topology must be chain")
-    construction = _require_mapping(_required(data, "master_world", "data"), "data.master_world")
-    expected = {
-        "latent_positions": 12,
-        "descriptive_facts_per_chain": 29,
-        "relation_facts_per_chain": 11,
-        "experimental_facts_per_chain": 40,
-        "identifier_fields_per_chain": 12,
-    }
-    for key, expected_value in expected.items():
-        if _require_positive_int(_required(construction, key, "data.master_world"), f"data.master_world.{key}") != expected_value:
-            raise ConfigError(f"data.master_world.{key} must be {expected_value}")
-    canonical = _require_mapping(_required(data, "canonical_source", "data"), "data.canonical_source")
-    path = _required(canonical, "path", "data.canonical_source")
-    if not isinstance(path, str) or not path.strip():
-        raise ConfigError("data.canonical_source.path must be a non-empty string")
+        raise ConfigError(f"{expected_name} must not define fixed T or N sweep arrays")
+    if expected_name == EXP02_NAME:
+        if data.get("schema_topology") != "chain":
+            raise ConfigError("data.schema_topology must be chain")
+        construction = _require_mapping(
+            _required(data, "master_world", "data"), "data.master_world"
+        )
+        expected = {
+            "latent_positions": 12,
+            "descriptive_facts_per_chain": 29,
+            "relation_facts_per_chain": 11,
+            "experimental_facts_per_chain": 40,
+            "identifier_fields_per_chain": 12,
+        }
+        for key, expected_value in expected.items():
+            if _require_positive_int(
+                _required(construction, key, "data.master_world"),
+                f"data.master_world.{key}",
+            ) != expected_value:
+                raise ConfigError(f"data.master_world.{key} must be {expected_value}")
+        canonical = _require_mapping(
+            _required(data, "canonical_source", "data"), "data.canonical_source"
+        )
+        path = _required(canonical, "path", "data.canonical_source")
+        if not isinstance(path, str) or not path.strip():
+            raise ConfigError("data.canonical_source.path must be a non-empty string")
+    else:
+        if data.get("schema_topology") != "single_table":
+            raise ConfigError("Experiment 3 data.schema_topology must be single_table")
+        if data.get("table") != "continent":
+            raise ConfigError("Experiment 3 data.table must be continent")
+        if data.get("facts_per_row") != 2:
+            raise ConfigError("Experiment 3 data.facts_per_row must be 2")
+        if data.get("max_rows_per_climate_band") != 2:
+            raise ConfigError(
+                "Experiment 3 data.max_rows_per_climate_band must be 2"
+            )
 
-    # Exp2 deliberately reuses the proven optimization/evaluation semantics.  Keep
-    # this validation compact and focused on fields consumed by the shared code.
+    # These experiments deliberately share the proven optimization/evaluation
+    # semantics. Keep validation focused on fields consumed by the shared code.
     for key in ("cpt_batch_size", "cpt_epochs", "gradient_accumulation_steps", "context_length"):
         _require_positive_int(_required(training, key, "training"), f"training.{key}")
     if "fact_exposure" in training:
-        raise ConfigError("Experiment-2 training must not define fact_exposure")
+        raise ConfigError(f"{expected_name} training must not define fact_exposure")
     for key in ("dataloader_workers",):
         _require_non_negative_int(_required(training, key, "training"), f"training.{key}")
     for key in ("shuffle", "gradient_checkpointing", "fused_optimizer", "pin_memory", "drop_last"):

@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from config import FINAL_EPOCH_EXPERIMENTS, uses_exp2_training_behavior
 from data.qa import RAW_ENTITY_IDENTIFIER, answer_is_in_question, normalize_for_leakage
 from data.qa_reference import verify_qa_reference_compatibility
 from evaluation.inference import (
@@ -170,7 +171,7 @@ def _load_authenticated_target_sft_split(
         "source_training_data_dir": split_manifest.get("source_training_data_dir"),
         "generation_timestamp": split_manifest.get("generation_timestamp"),
     }
-    if split_manifest.get("experiment_name") == "exp02_capacity_boundary":
+    if split_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS:
         expected_metadata["source_dataset_manifest_sha256"] = split_manifest.get(
             "source_dataset_manifest_sha256"
         )
@@ -192,7 +193,7 @@ def _load_authenticated_target_sft_split(
             dataset_path / split / f"{hop_name}.jsonl",
             f"target-SFT {split} {hop_name}",
             allow_empty=(
-                split_manifest.get("experiment_name") == "exp02_capacity_boundary"
+                split_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS
                 and counts.get(hop_name, {}).get("final_retained_count") == 0
             ),
         )
@@ -264,7 +265,7 @@ def load_target_sft_dataset(
     )
     split_manifest_sha256 = hash_file(split_manifest_path)
     split_manifest = read_json(split_manifest_path)
-    if split_manifest.get("experiment_name") == "exp02_capacity_boundary":
+    if split_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS:
         if dev_split is not None:
             raise ValueError("Experiment-2 target SFT must not configure a dev split")
         expected_root = {
@@ -273,8 +274,16 @@ def load_target_sft_dataset(
             "N": fact_count,
             "requested_N": fact_count,
             "source_evaluation_split_manifest": "../split_manifest.json",
-            "question_template_version": "semantic_academic_closed_book_v1",
-            "sft_split_method_version": EXP2_TARGET_SFT_SPLIT_METHOD_VERSION,
+            "question_template_version": (
+                "exp03_continent_tasks_v1"
+                if split_manifest.get("experiment_name") == "exp03_continent_inverse"
+                else "semantic_academic_closed_book_v1"
+            ),
+            "sft_split_method_version": (
+                "all_continent_rows_train_v1"
+                if split_manifest.get("experiment_name") == "exp03_continent_inverse"
+                else EXP2_TARGET_SFT_SPLIT_METHOD_VERSION
+            ),
             "zero_context": True,
             "target_qa_training_generated": True,
             "deterministic_generation": True,
@@ -692,7 +701,7 @@ def build_target_sft_training_plan(
         raise ValueError("target_sft.dataset_dir must be target_sft")
     if settings.get("training_split") != TARGET_SFT_TRAIN_SPLIT:
         raise ValueError("target_sft.training_split must be train")
-    is_exp2 = config.get("experiment", {}).get("name") == "exp02_capacity_boundary"
+    is_exp2 = uses_exp2_training_behavior(config)
     if is_exp2:
         for stale_key in ("dev_split", "early_stopping_patience"):
             if stale_key in settings:
@@ -1120,12 +1129,22 @@ def run_target_sft_training(
         train_log_path=train_log_path,
     )
     settings = config.get("target_sft", {})
+    uses_final_epoch_flow = uses_exp2_training_behavior(config)
     is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
-    configured_reference_dir = None if is_exp2 else qa_reference_dir(config)
-    if not is_exp2 and Path(qa_condition_dir).resolve() != configured_reference_dir.resolve():
-        raise ValueError("target SFT must use the configured immutable data.qa_reference directory")
+    configured_reference_dir = (
+        None if uses_final_epoch_flow else qa_reference_dir(config)
+    )
+    if (
+        not uses_final_epoch_flow
+        and Path(qa_condition_dir).resolve() != configured_reference_dir.resolve()
+    ):
+        raise ValueError(
+            "target SFT must use the configured immutable data.qa_reference directory"
+        )
     reference_table_count, reference_fact_count = (
-        (table_count, fact_count) if is_exp2 else qa_reference_values(config)
+        (table_count, fact_count)
+        if uses_final_epoch_flow
+        else qa_reference_values(config)
     )
     train_records, dev_records, provenance = load_target_sft_dataset(
         qa_condition_dir,
@@ -1135,7 +1154,7 @@ def run_target_sft_training(
         table_count=reference_table_count,
         fact_count=reference_fact_count,
     )
-    if is_exp2:
+    if uses_final_epoch_flow:
         compatibility = {
             "current_database_condition": {
                 "T": table_count, "N": fact_count,
@@ -1187,7 +1206,7 @@ def run_target_sft_training(
     ]
     dev_examples = (
         []
-        if is_exp2
+        if uses_final_epoch_flow
         else [
             encode_target_sft_example(
                 record, tokenizer, context_length=plan["context_length"]
@@ -1248,7 +1267,7 @@ def run_target_sft_training(
         generator=generator,
     )
     dev_loader = None
-    if not is_exp2:
+    if not uses_final_epoch_flow:
         dev_loader = DataLoader(
             dev_examples,
             batch_size=plan["batch_size"],
@@ -1340,7 +1359,7 @@ def run_target_sft_training(
         "provenance": provenance,
         "training": plan,
     }
-    if is_exp2:
+    if uses_final_epoch_flow:
         run_record.update(
             {
                 "requested_sft_epochs": plan["epochs"],
@@ -1454,7 +1473,7 @@ def run_target_sft_training(
             "train_supervised_shifted_tokens": epoch_loss_tokens,
         }
         should_stop = False
-        if not is_exp2:
+        if not uses_final_epoch_flow:
             assert dev_loader is not None
             epoch_record.update(
                 evaluate_target_sft_dev(
@@ -1508,7 +1527,7 @@ def run_target_sft_training(
         raise RuntimeError(
             "target SFT did not use every example exactly once per epoch"
         )
-    if is_exp2:
+    if uses_final_epoch_flow:
         if completed_epochs != plan["epochs"]:
             raise RuntimeError(
                 "Experiment-2 target SFT did not complete every requested epoch"
@@ -1518,7 +1537,7 @@ def run_target_sft_training(
             tokenizer=tokenizer,
             output_checkpoint=output_checkpoint,
             previous_use_cache=previous_use_cache,
-            retain_only_exp2_checkpoint=True,
+            retain_only_exp2_checkpoint=is_exp2,
         )
     else:
         if best_epoch_record is None:
@@ -1549,7 +1568,7 @@ def run_target_sft_training(
         "validation_split_used": False,
         "test_split_used": False,
     }
-    if is_exp2:
+    if uses_final_epoch_flow:
         summary.update(
             {
                 "requested_sft_epochs": plan["epochs"],
