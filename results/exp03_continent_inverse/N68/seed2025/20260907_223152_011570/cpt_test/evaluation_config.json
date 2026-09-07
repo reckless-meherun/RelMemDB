@@ -1,0 +1,31 @@
+{
+  "L": 12,
+  "N": 68,
+  "T": 1,
+  "batch_size": 32,
+  "checkpoint_path": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223152_011570",
+  "checkpoint_training_metadata_sha256": "c7fe54f92b5318a32c4a5d7c67d92c54a6c5cdebfb479c90000a242d56f00cbd",
+  "context_length": 256,
+  "cpt_test_manifest_sha256": "4b54671dec80c52dbca1db0236a6ac278ddb5001498fde0a8053d964a4519e38",
+  "cpt_test_method_version": "canonical_and_heldout_declarative_completion_v1",
+  "cpt_test_probe_count": 68,
+  "cpt_test_probes_sha256": "3338e97b198149f61468c5bed0057bfd3ca9021d1c13586f9a40b5b324b7dac6",
+  "decoding": {
+    "do_sample": false,
+    "strategy": "greedy",
+    "temperature": null
+  },
+  "evaluation_stage": "eval_cpt_test",
+  "experiment_name": "exp03_continent_inverse",
+  "max_new_tokens": 64,
+  "model_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223152_011570",
+  "natural_language_questions": false,
+  "primary_metric": "completion_prefix_match",
+  "prompt_format": "raw_declarative_prefix",
+  "seed": 2025,
+  "selected_tables": [
+    "continent"
+  ],
+  "test_dataset": "cpt_test",
+  "tokenizer_identity": "/home/hpc4090/meherun/relmemdb/models/trained_models/gpt2_exp03_N68_L12_20260907_223152_011570"
+}
