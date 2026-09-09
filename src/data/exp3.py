@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from data.cpt_test import generate_cpt_test, verify_cpt_test
+from data.qa import normalize_for_leakage
 from data.serialize import serialize_database_cpt
 from data.world import _identifier, _natural_name_candidate
 from utils.hashing import hash_file, hash_json_object
@@ -17,6 +18,9 @@ EXP3_NAME = "exp03_continent_inverse"
 EXP3_MODE = "standalone_canonical_table"
 EXP3_QUESTION_TEMPLATE_VERSION = "exp03_continent_tasks_v2"
 EXP3_SFT_SPLIT_METHOD_VERSION = "all_continent_rows_train_v1"
+EXP3_INVERSE_SFT_QUESTION_TEMPLATE_VERSION = "exp03_inverse_sft_train_v1"
+EXP3_INVERSE_SFT_SPLIT_METHOD_VERSION = "one_per_used_climate_band_train_v1"
+EXP3_INVERSE_SFT_DATASET_DIR = "inverse_sft"
 HOP_NAMES = ("H0", "H1", "H2", "H3")
 
 CLIMATE_BANDS = (
@@ -370,6 +374,46 @@ def build_exp3_aggregation_records(
     return records
 
 
+def build_exp3_inverse_sft_records(
+    rows: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        grouped[row["climate_band"]].append(row)
+    records: list[dict[str, Any]] = []
+    for band in CLIMATE_BANDS:
+        members = grouped.get(band, [])
+        if not members:
+            continue
+        members.sort(key=lambda row: row["continent_id"])
+        names = [row["continent_name"] for row in members]
+        if not 1 <= len(names) <= 2:
+            raise RuntimeError("Experiment-3 inverse SFT cardinality must be 1 or 2")
+        records.append(
+            {
+                "id": (
+                    "exp3_inverse_sft_"
+                    f"{hash_json_object([EXP3_NAME, 'inverse_sft', band])[:32]}"
+                ),
+                "split": "train",
+                "hop": 0,
+                "question": (
+                    f"Name every continent associated with the {band} climate band."
+                ),
+                "gold_answer": ", ".join(names),
+                "fact_type": "attribute",
+                "source_entity_type": "continent",
+                "target_entity_type": "continent",
+                "target_field": "continent_name",
+            }
+        )
+    if len(records) != len(grouped):
+        raise RuntimeError(
+            "Experiment-3 must have one inverse SFT QA per used climate band"
+        )
+    return records
+
+
 def _counts(h0_count: int) -> dict[str, dict[str, int]]:
     return {
         hop: {
@@ -528,11 +572,117 @@ def generate_exp3_qa(
         "sft_operation": "continent_name_to_climate_band",
     }
     write_json(sft_dir / "split_manifest.json", sft_manifest)
+
+    inverse_sft_records = build_exp3_inverse_sft_records(rows)
+    exact_inverse_questions = {record["question"] for record in inverse_sft_records}
+    exact_aggregation_questions = {
+        record["question"] for record in aggregation_test
+    }
+    normalized_inverse_questions = {
+        normalize_for_leakage(question) for question in exact_inverse_questions
+    }
+    normalized_aggregation_questions = {
+        normalize_for_leakage(question) for question in exact_aggregation_questions
+    }
+    exact_overlap_count = len(exact_inverse_questions & exact_aggregation_questions)
+    normalized_overlap_count = len(
+        normalized_inverse_questions & normalized_aggregation_questions
+    )
+    if exact_overlap_count or normalized_overlap_count:
+        raise RuntimeError(
+            "Experiment-3 inverse SFT questions overlap aggregation-test questions"
+        )
+
+    inverse_sft_dir = output_dir / EXP3_INVERSE_SFT_DATASET_DIR
+    inverse_train_dir = inverse_sft_dir / "train"
+    inverse_sft_paths = {
+        hop: inverse_train_dir / f"{hop}.jsonl" for hop in HOP_NAMES
+    }
+    for hop, path in inverse_sft_paths.items():
+        write_jsonl(path, inverse_sft_records if hop == "H0" else [])
+    used_band_indices = [
+        index
+        for index, band in enumerate(CLIMATE_BANDS)
+        if any(row["climate_band"] == band for row in rows)
+    ]
+    inverse_base = {
+        **base,
+        "question_template_version": EXP3_INVERSE_SFT_QUESTION_TEMPLATE_VERSION,
+    }
+    overlap_audit = {
+        "exact_question_overlap_counts": {
+            "train__aggregation_test": exact_overlap_count
+        },
+        "normalized_question_overlap_counts": {
+            "train__aggregation_test": normalized_overlap_count
+        },
+        "inverse_sft_questions_sha256": hash_json_object(
+            sorted(exact_inverse_questions)
+        ),
+        "aggregation_test_questions_sha256": hash_json_object(
+            sorted(exact_aggregation_questions)
+        ),
+        "source_aggregation_test_manifest_sha256": hash_file(
+            output_dir / "aggregation_test" / "manifest.json"
+        ),
+    }
+    inverse_train_manifest = {
+        **inverse_base,
+        "N": fact_count,
+        "split": "train",
+        "chain_count": len(used_band_indices),
+        "chain_indices": used_band_indices,
+        "chain_indices_sha256": hash_json_object(used_band_indices),
+        "source_evaluation_split_manifest_sha256": hash_file(
+            output_dir / "split_manifest.json"
+        ),
+        "sft_split_method_version": EXP3_INVERSE_SFT_SPLIT_METHOD_VERSION,
+        "counts": _counts(len(inverse_sft_records)),
+        "retained_counts": {
+            hop: len(inverse_sft_records) if hop == "H0" else 0
+            for hop in HOP_NAMES
+        },
+        "final_retained_total": len(inverse_sft_records),
+        "output_file_hashes": {
+            path.name: hash_file(path) for path in inverse_sft_paths.values()
+        },
+        **overlap_audit,
+    }
+    write_json(inverse_train_dir / "manifest.json", inverse_train_manifest)
+    inverse_assignments = {"train": used_band_indices}
+    inverse_sft_manifest = {
+        **inverse_base,
+        "N": fact_count,
+        "source_evaluation_split_manifest": "../split_manifest.json",
+        "source_evaluation_split_manifest_sha256": hash_file(
+            output_dir / "split_manifest.json"
+        ),
+        "sft_split_method_version": EXP3_INVERSE_SFT_SPLIT_METHOD_VERSION,
+        "target_qa_training_generated": True,
+        "deterministic_generation": True,
+        "runtime_llm_used": False,
+        "immutable_evaluation_artifacts_unchanged": True,
+        "train_chain_count": len(used_band_indices),
+        "train_chain_indices": used_band_indices,
+        "train_chain_indices_sha256": hash_json_object(used_band_indices),
+        "chain_assignment_hashes": {
+            "train": hash_json_object(used_band_indices)
+        },
+        "target_sft_chain_assignments_sha256": hash_json_object(
+            inverse_assignments
+        ),
+        "train_manifest_sha256": hash_file(inverse_train_dir / "manifest.json"),
+        "sft_operation": "climate_band_to_continent_names",
+        **overlap_audit,
+    }
+    write_json(inverse_sft_dir / "split_manifest.json", inverse_sft_manifest)
     return {
         "root": output_dir.resolve(),
         "sft_data_dir": sft_dir.resolve(),
+        "inverse_sft_data_dir": inverse_sft_dir.resolve(),
         "root_manifest": root_manifest,
         "sft_manifest": sft_manifest,
+        "inverse_sft_manifest": inverse_sft_manifest,
     }
 
 
@@ -547,21 +697,28 @@ def verify_exp3_qa(
     qa_dir = Path(qa_dir).resolve()
     root_path = qa_dir / "split_manifest.json"
     sft_path = qa_dir / "target_sft" / "split_manifest.json"
+    inverse_sft_path = qa_dir / EXP3_INVERSE_SFT_DATASET_DIR / "split_manifest.json"
     root = read_json(root_path)
     sft = read_json(sft_path)
-    for manifest in (root, sft):
+    inverse_sft = read_json(inverse_sft_path)
+    for manifest in (root, sft, inverse_sft):
         if (
             manifest.get("experiment_name") != EXP3_NAME
             or manifest.get("T") != 1
             or manifest.get("requested_N") != fact_count
             or manifest.get("selected_tables") != ["continent"]
-            or manifest.get("question_template_version")
-            != EXP3_QUESTION_TEMPLATE_VERSION
             or manifest.get("source_database_sha256") != hash_file(dataset["database"])
             or manifest.get("source_database_manifest_sha256")
             != hash_file(dataset["manifest_path"])
         ):
             raise ValueError("Experiment-3 QA provenance is inconsistent")
+    if (
+        root.get("question_template_version") != EXP3_QUESTION_TEMPLATE_VERSION
+        or sft.get("question_template_version") != EXP3_QUESTION_TEMPLATE_VERSION
+        or inverse_sft.get("question_template_version")
+        != EXP3_INVERSE_SFT_QUESTION_TEMPLATE_VERSION
+    ):
+        raise ValueError("Experiment-3 QA question-template provenance is inconsistent")
     sft_records = read_jsonl(qa_dir / "target_sft" / "train" / "H0.jsonl")
     expected_sft = build_exp3_sft_records(dataset["rows"])
     if sft_records != expected_sft or len(sft_records) != fact_count // 2:
@@ -590,10 +747,107 @@ def verify_exp3_qa(
         raise ValueError("Experiment-3 aggregation-test count is inconsistent")
     if any(not 1 <= len(record["gold_answer"].split(", ")) <= 2 for record in records):
         raise ValueError("Experiment-3 aggregation-test answer cardinality is invalid")
+    inverse_sft_records = read_jsonl(
+        qa_dir / EXP3_INVERSE_SFT_DATASET_DIR / "train" / "H0.jsonl"
+    )
+    expected_inverse_sft = build_exp3_inverse_sft_records(dataset["rows"])
+    if inverse_sft_records != expected_inverse_sft:
+        raise ValueError("Experiment-3 inverse-SFT QA is inconsistent")
+    for hop in HOP_NAMES[1:]:
+        if read_jsonl(
+            qa_dir / EXP3_INVERSE_SFT_DATASET_DIR / "train" / f"{hop}.jsonl"
+        ):
+            raise ValueError("Experiment-3 inverse-SFT H1/H2/H3 must be empty")
+    exact_overlap_count = len(
+        {record["question"] for record in inverse_sft_records}
+        & {record["question"] for record in records}
+    )
+    normalized_overlap_count = len(
+        {
+            normalize_for_leakage(record["question"])
+            for record in inverse_sft_records
+        }
+        & {normalize_for_leakage(record["question"]) for record in records}
+    )
+    expected_overlap_audits = {
+        "exact_question_overlap_counts": {
+            "train__aggregation_test": exact_overlap_count
+        },
+        "normalized_question_overlap_counts": {
+            "train__aggregation_test": normalized_overlap_count
+        },
+    }
+    if exact_overlap_count or normalized_overlap_count:
+        raise ValueError(
+            "Experiment-3 inverse-SFT questions overlap aggregation-test questions"
+        )
+    for field, expected in expected_overlap_audits.items():
+        if inverse_sft.get(field) != expected:
+            raise ValueError(f"Experiment-3 inverse-SFT {field} is inconsistent")
+    inverse_train_dir = qa_dir / EXP3_INVERSE_SFT_DATASET_DIR / "train"
+    inverse_train_manifest_path = inverse_train_dir / "manifest.json"
+    inverse_train_manifest = read_json(inverse_train_manifest_path)
+    if inverse_sft.get("train_manifest_sha256") != hash_file(
+        inverse_train_manifest_path
+    ):
+        raise ValueError("Experiment-3 inverse-SFT train manifest hash is inconsistent")
+    if inverse_sft.get("source_aggregation_test_manifest_sha256") != hash_file(
+        qa_dir / "aggregation_test" / "manifest.json"
+    ):
+        raise ValueError(
+            "Experiment-3 inverse-SFT aggregation-test provenance is inconsistent"
+        )
+    used_band_indices = [
+        index
+        for index, band in enumerate(CLIMATE_BANDS)
+        if any(row["climate_band"] == band for row in dataset["rows"])
+    ]
+    expected_inverse_metadata = {
+        "sft_split_method_version": EXP3_INVERSE_SFT_SPLIT_METHOD_VERSION,
+        "train_chain_count": len(used_band_indices),
+        "train_chain_indices": used_band_indices,
+        "train_chain_indices_sha256": hash_json_object(used_band_indices),
+        "sft_operation": "climate_band_to_continent_names",
+        "inverse_sft_questions_sha256": hash_json_object(
+            sorted(record["question"] for record in inverse_sft_records)
+        ),
+        "aggregation_test_questions_sha256": hash_json_object(
+            sorted(record["question"] for record in records)
+        ),
+    }
+    for field, expected in expected_inverse_metadata.items():
+        if inverse_sft.get(field) != expected:
+            raise ValueError(f"Experiment-3 inverse-SFT {field} is inconsistent")
+    for field, expected in {
+        **expected_overlap_audits,
+        "inverse_sft_questions_sha256": expected_inverse_metadata[
+            "inverse_sft_questions_sha256"
+        ],
+        "aggregation_test_questions_sha256": expected_inverse_metadata[
+            "aggregation_test_questions_sha256"
+        ],
+    }.items():
+        if inverse_train_manifest.get(field) != expected:
+            raise ValueError(
+                f"Experiment-3 inverse-SFT train manifest {field} is inconsistent"
+            )
+    if inverse_sft.get("source_evaluation_split_manifest_sha256") != hash_file(
+        root_path
+    ):
+        raise ValueError(
+            "Experiment-3 inverse-SFT evaluation-manifest provenance is inconsistent"
+        )
+    inverse_output_hashes = inverse_train_manifest.get("output_file_hashes", {})
+    for hop in HOP_NAMES:
+        path = inverse_train_dir / f"{hop}.jsonl"
+        if inverse_output_hashes.get(path.name) != hash_file(path):
+            raise ValueError(f"Experiment-3 inverse-SFT {hop} hash is inconsistent")
     return {
         "root": qa_dir,
         "sft_data_dir": qa_dir / "target_sft",
+        "inverse_sft_data_dir": qa_dir / EXP3_INVERSE_SFT_DATASET_DIR,
         "root_manifest": root,
         "sft_manifest": sft,
+        "inverse_sft_manifest": inverse_sft,
         "cpt_test": cpt_test,
     }

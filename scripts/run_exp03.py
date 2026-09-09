@@ -19,6 +19,7 @@ if str(SRC_DIR) not in sys.path:
 from config import EXP03_NAME, load_config, validate_config
 from data.cpt_test import CPT_TEST_PROBE_TYPES
 from data.exp3 import (
+    EXP3_INVERSE_SFT_DATASET_DIR,
     generate_exp3_qa,
     materialize_exp3_dataset,
     validate_exp3_fact_count,
@@ -539,6 +540,14 @@ def main() -> None:
         "status": "running",
         "created_at": _utc_iso(),
         "N": args.fact_count,
+        "stage_order": [
+            "cpt",
+            "cpt_test",
+            "attribute_sft",
+            "inverse_sft",
+            "attribute_test",
+            "aggregation_test",
+        ],
     }
     write_json(state_path, state)
     try:
@@ -570,6 +579,7 @@ def main() -> None:
                 seed=seed,
             )
         state["qa_path"] = str(qa["root"])
+        state["inverse_sft_data_path"] = str(qa["inverse_sft_data_dir"])
         write_json(state_path, state)
 
         model_component = safe_component(args.model)
@@ -621,10 +631,38 @@ def main() -> None:
         if sft_summary.get("experiment") != EXP03_NAME:
             raise RuntimeError("SFT checkpoint has the wrong experiment identity")
         state["sft_checkpoint_path"] = str(sft_checkpoint)
+        state["attribute_sft_checkpoint_path"] = str(sft_checkpoint)
+        write_json(state_path, state)
+
+        inverse_sft_checkpoint = TRAINED_MODELS_ROOT / f"{stem}_inverse_sft"
+        inverse_sft_summary = run_target_sft_training(
+            config,
+            table_count=1,
+            fact_count=args.fact_count,
+            layers=layers,
+            source_checkpoint=sft_checkpoint,
+            output_checkpoint=inverse_sft_checkpoint,
+            run_config_path=run_dir / "inverse_sft" / "run_config.yaml",
+            train_log_path=run_dir / "inverse_sft" / "train_log.jsonl",
+            qa_condition_dir=qa["root"],
+            dataset_dir=EXP3_INVERSE_SFT_DATASET_DIR,
+        )
+        if inverse_sft_summary.get("experiment") != EXP03_NAME:
+            raise RuntimeError("inverse-SFT checkpoint has the wrong experiment identity")
+        if Path(inverse_sft_summary.get("source_checkpoint", "")).resolve() != (
+            sft_checkpoint.resolve()
+        ):
+            raise RuntimeError(
+                "inverse SFT did not start from the attribute-SFT checkpoint"
+            )
+        state["inverse_sft_checkpoint_path"] = str(inverse_sft_checkpoint)
+        state["final_checkpoint_path"] = str(inverse_sft_checkpoint)
+        state["final_evaluation_checkpoint_path"] = str(inverse_sft_checkpoint)
+        write_json(state_path, state)
 
         attribute_metrics, attribute_test_result = _evaluate(
             config,
-            checkpoint=sft_checkpoint,
+            checkpoint=inverse_sft_checkpoint,
             qa_root=qa["root"],
             dataset_name="attribute_test",
             output_dir=condition_results / "sft_attribute_test",
@@ -634,7 +672,7 @@ def main() -> None:
         )
         aggregation_metrics, aggregation_test_result = _evaluate(
             config,
-            checkpoint=sft_checkpoint,
+            checkpoint=inverse_sft_checkpoint,
             qa_root=qa["root"],
             dataset_name="aggregation_test",
             output_dir=condition_results / "sft_aggregation_test",
@@ -665,6 +703,8 @@ def main() -> None:
             "model": args.model,
             "layers": layers,
             "epochs": config["target_sft"]["epochs"],
+            "attribute_sft_epochs": config["target_sft"]["epochs"],
+            "inverse_sft_epochs": config["target_sft"]["epochs"],
             "cpt_epochs": config["training"]["cpt_epochs"],
             "seed": seed,
             "EM": aggregation_em,
@@ -672,13 +712,14 @@ def main() -> None:
             "attribute_test_em": attribute_em,
             "aggregation_test_em": aggregation_em,
             "aggregation_unordered_em": aggregation_unordered_em,
-            "checkpoint_source": str(sft_checkpoint),
+            "checkpoint_source": str(inverse_sft_checkpoint),
+            "attribute_sft_checkpoint_source": str(sft_checkpoint),
             "run": str(run_dir),
             "attribute_test_result": str(attribute_test_result),
             "aggregation_test_result": str(aggregation_test_result),
         }
         improved = retain_best_exp3_checkpoint(
-            sft_checkpoint, best_checkpoint, best_metadata
+            inverse_sft_checkpoint, best_checkpoint, best_metadata
         )
         state.update(
             {
@@ -708,6 +749,7 @@ def main() -> None:
     print(f"Dataset: {state['dataset_path']}")
     print(f"QA: {state['qa_path']}")
     print(f"SFT checkpoint: {state['sft_checkpoint_path']}")
+    print(f"Inverse SFT checkpoint: {state['inverse_sft_checkpoint_path']}")
     print(f"CPT test result: {state['cpt_test_result_path']}")
     print(f"Attribute test result: {state['sft_attribute_test_result_path']}")
     print(f"Aggregation test result: {state['sft_aggregation_test_result_path']}")

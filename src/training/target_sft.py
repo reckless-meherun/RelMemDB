@@ -30,6 +30,7 @@ from utils.io import read_json, read_jsonl, write_json, write_jsonl, write_yaml
 from utils.paths import database_condition_dir, qa_reference_dir
 
 TARGET_SFT_DATASET_DIR = "target_sft"
+EXP3_INVERSE_SFT_DATASET_DIR = "inverse_sft"
 TARGET_SFT_TRAIN_SPLIT = "train"
 TARGET_SFT_DEV_SPLIT = "dev"
 TARGET_SFT_SPLIT_METHOD_VERSION = "reserved_order_9_train_1_dev_v1"
@@ -253,8 +254,8 @@ def load_target_sft_dataset(
     fact_count: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Authenticate and load only dedicated target-SFT training records."""
-    if dataset_dir != TARGET_SFT_DATASET_DIR:
-        raise ValueError("target SFT dataset_dir must be target_sft")
+    if dataset_dir not in {TARGET_SFT_DATASET_DIR, EXP3_INVERSE_SFT_DATASET_DIR}:
+        raise ValueError("target SFT dataset_dir is not an approved SFT dataset")
     if training_split != TARGET_SFT_TRAIN_SPLIT:
         raise ValueError(
             "target SFT may load only target_sft/train; validation and test are forbidden"
@@ -267,24 +268,33 @@ def load_target_sft_dataset(
     split_manifest = read_json(split_manifest_path)
     if split_manifest.get("experiment_name") in FINAL_EPOCH_EXPERIMENTS:
         is_exp3 = split_manifest.get("experiment_name") == "exp03_continent_inverse"
+        is_inverse_sft = dataset_dir == EXP3_INVERSE_SFT_DATASET_DIR
+        if is_inverse_sft and not is_exp3:
+            raise ValueError("inverse_sft is supported only for Experiment 3")
         if dev_split is not None:
             raise ValueError("Experiment-2 target SFT must not configure a dev split")
+        expected_question_template = (
+            "exp03_inverse_sft_train_v1"
+            if is_inverse_sft
+            else "exp03_continent_tasks_v2"
+            if is_exp3
+            else "semantic_academic_closed_book_v1"
+        )
+        expected_split_method = (
+            "one_per_used_climate_band_train_v1"
+            if is_inverse_sft
+            else "all_continent_rows_train_v1"
+            if is_exp3
+            else EXP2_TARGET_SFT_SPLIT_METHOD_VERSION
+        )
         expected_root = {
             "format_version": 2,
             "T": table_count,
             "N": fact_count,
             "requested_N": fact_count,
             "source_evaluation_split_manifest": "../split_manifest.json",
-            "question_template_version": (
-                "exp03_continent_tasks_v2"
-                if is_exp3
-                else "semantic_academic_closed_book_v1"
-            ),
-            "sft_split_method_version": (
-                "all_continent_rows_train_v1"
-                if split_manifest.get("experiment_name") == "exp03_continent_inverse"
-                else EXP2_TARGET_SFT_SPLIT_METHOD_VERSION
-            ),
+            "question_template_version": expected_question_template,
+            "sft_split_method_version": expected_split_method,
             "zero_context": True,
             "target_qa_training_generated": True,
             "deterministic_generation": True,
@@ -294,6 +304,14 @@ def load_target_sft_dataset(
         for key, expected in expected_root.items():
             if split_manifest.get(key) != expected:
                 raise ValueError(f"Experiment-2 target-SFT split manifest {key} is inconsistent")
+        if is_exp3:
+            expected_operation = (
+                "climate_band_to_continent_names"
+                if is_inverse_sft
+                else "continent_name_to_climate_band"
+            )
+            if split_manifest.get("sft_operation") != expected_operation:
+                raise ValueError("Experiment-3 target-SFT operation is inconsistent")
         selected = split_manifest.get("selected_tables")
         if not isinstance(selected, list) or len(selected) != table_count:
             raise ValueError("Experiment-2 target-SFT selected-table metadata is invalid")
@@ -324,6 +342,12 @@ def load_target_sft_dataset(
                 raise ValueError(f"Experiment-2 target-SFT {split} chain assignment hash is invalid")
         if split_manifest.get("target_sft_chain_assignments_sha256") != hash_json_object(assignments):
             raise ValueError("Experiment-2 target-SFT combined chain assignment hash is invalid")
+        if is_inverse_sft and assignments["train"] != list(
+            range(split_manifest["train_chain_count"])
+        ):
+            raise ValueError(
+                "Experiment-3 inverse-SFT climate-band assignments are invalid"
+            )
         if not is_exp3:
             partition_sets = {
                 "train": set(assignments["train"]),
@@ -357,7 +381,11 @@ def load_target_sft_dataset(
         if hash_file(evaluation_manifest_path) != split_manifest.get("source_evaluation_split_manifest_sha256"):
             raise ValueError("Experiment-2 SFT evaluation-manifest provenance mismatch")
         evaluation_manifest = read_json(evaluation_manifest_path)
-        if assignments["train"] != evaluation_manifest.get("reserved_chain_indices"):
+        if (
+            not is_inverse_sft
+            and assignments["train"]
+            != evaluation_manifest.get("reserved_chain_indices")
+        ):
             raise ValueError(
                 "Experiment-2 target-SFT train chains must equal all reserved chains"
             )
@@ -368,6 +396,26 @@ def load_target_sft_dataset(
         ):
             if not _is_sha256(split_manifest.get(field)):
                 raise ValueError(f"Experiment-2 target-SFT split manifest {field} is invalid")
+        if is_inverse_sft:
+            for audit_field in (
+                "exact_question_overlap_counts",
+                "normalized_question_overlap_counts",
+            ):
+                _require_zero_overlap_audit(
+                    split_manifest,
+                    audit_field,
+                    required_pairs={"train__aggregation_test"},
+                )
+            aggregation_manifest_path = _require_nonempty_file(
+                qa_root / "aggregation_test" / "manifest.json",
+                "Experiment-3 aggregation-test manifest",
+            )
+            if hash_file(aggregation_manifest_path) != split_manifest.get(
+                "source_aggregation_test_manifest_sha256"
+            ):
+                raise ValueError(
+                    "Experiment-3 inverse-SFT aggregation-test provenance mismatch"
+                )
         train_records, train_provenance = _load_authenticated_target_sft_split(
             dataset_path=dataset_path, split=training_split,
             split_manifest=split_manifest, split_manifest_sha256=split_manifest_sha256,
@@ -388,6 +436,7 @@ def load_target_sft_dataset(
             "qa_condition_dir": str(Path(qa_condition_dir).resolve()),
             "source_training_data_dir": str(source_dir),
             "selected_tables": selected,
+            "dataset_dir": dataset_dir,
             "target_sft_split_manifest_sha256": split_manifest_sha256,
             "train_manifest_sha256": train_provenance["manifest_sha256"],
             "source_database_sha256": split_manifest["source_database_sha256"],
@@ -659,6 +708,7 @@ def build_target_sft_training_plan(
     fact_count: int,
     example_count: int,
     layers: int | None = None,
+    dataset_dir: str | None = None,
 ) -> dict[str, Any]:
     """Validate target-SFT settings and calculate exact update accounting."""
     settings = config.get("target_sft")
@@ -701,6 +751,19 @@ def build_target_sft_training_plan(
 
     if settings.get("dataset_dir") != TARGET_SFT_DATASET_DIR:
         raise ValueError("target_sft.dataset_dir must be target_sft")
+    selected_dataset_dir = (
+        settings["dataset_dir"] if dataset_dir is None else dataset_dir
+    )
+    if selected_dataset_dir not in {
+        TARGET_SFT_DATASET_DIR,
+        EXP3_INVERSE_SFT_DATASET_DIR,
+    }:
+        raise ValueError("target SFT dataset_dir is not an approved SFT dataset")
+    if (
+        selected_dataset_dir == EXP3_INVERSE_SFT_DATASET_DIR
+        and config.get("experiment", {}).get("name") != "exp03_continent_inverse"
+    ):
+        raise ValueError("inverse_sft is supported only for Experiment 3")
     if settings.get("training_split") != TARGET_SFT_TRAIN_SPLIT:
         raise ValueError("target_sft.training_split must be train")
     is_exp2 = uses_exp2_training_behavior(config)
@@ -773,7 +836,7 @@ def build_target_sft_training_plan(
         "T": table_count,
         "N": fact_count,
         "L": configured_model_layers(config) if layers is None else layers,
-        "dataset_dir": TARGET_SFT_DATASET_DIR,
+        "dataset_dir": selected_dataset_dir,
         "training_split": TARGET_SFT_TRAIN_SPLIT,
         "example_count": example_count,
         "batch_size": batch_size,
@@ -1111,6 +1174,7 @@ def run_target_sft_training(
     run_config_path: str | Path,
     train_log_path: str | Path,
     qa_condition_dir: str | Path,
+    dataset_dir: str | None = None,
 ) -> dict[str, Any]:
     """Run full-parameter closed-book SFT without loading any held-out QA."""
     source_checkpoint = Path(source_checkpoint)
@@ -1131,6 +1195,9 @@ def run_target_sft_training(
         train_log_path=train_log_path,
     )
     settings = config.get("target_sft", {})
+    selected_dataset_dir = (
+        settings.get("dataset_dir") if dataset_dir is None else dataset_dir
+    )
     uses_final_epoch_flow = uses_exp2_training_behavior(config)
     is_exp2 = config["experiment"]["name"] == "exp02_capacity_boundary"
     configured_reference_dir = (
@@ -1150,7 +1217,7 @@ def run_target_sft_training(
     )
     train_records, dev_records, provenance = load_target_sft_dataset(
         qa_condition_dir,
-        dataset_dir=settings.get("dataset_dir"),
+        dataset_dir=selected_dataset_dir,
         training_split=settings.get("training_split"),
         dev_split=settings.get("dev_split"),
         table_count=reference_table_count,
@@ -1173,11 +1240,20 @@ def run_target_sft_training(
         checkpoint_metadata_path = source_checkpoint / "training_metadata.json"
         if not checkpoint_metadata_path.is_file():
             raise FileNotFoundError(
-                "Experiment-2 target SFT requires a CPT checkpoint with training_metadata.json"
+                "final-epoch target SFT requires a source checkpoint with "
+                "training_metadata.json"
             )
         checkpoint_metadata = read_json(checkpoint_metadata_path)
         if checkpoint_metadata.get("model") != config["model"]["name"]:
-            raise ValueError("source CPT checkpoint model identity is incompatible")
+            raise ValueError("source checkpoint model identity is incompatible")
+        if selected_dataset_dir == EXP3_INVERSE_SFT_DATASET_DIR and (
+            checkpoint_metadata.get("stage") != "target-sft"
+            or checkpoint_metadata.get("sft_dataset_dir")
+            != TARGET_SFT_DATASET_DIR
+        ):
+            raise ValueError(
+                "Experiment-3 inverse SFT must start from the attribute-SFT checkpoint"
+            )
         checkpoint_provenance = checkpoint_metadata.get("provenance", {})
         for field in ("source_database_sha256", "database_manifest_sha256"):
             expected = (
@@ -1185,8 +1261,17 @@ def run_target_sft_training(
                 if field == "source_database_sha256"
                 else provenance["source_database_manifest_sha256"]
             )
-            if checkpoint_provenance.get(field) != expected:
-                raise ValueError(f"source CPT checkpoint provenance mismatch for {field}")
+            actual = checkpoint_provenance.get(field)
+            if (
+                selected_dataset_dir == EXP3_INVERSE_SFT_DATASET_DIR
+                and field == "database_manifest_sha256"
+                and actual is None
+            ):
+                actual = checkpoint_provenance.get(
+                    "source_database_manifest_sha256"
+                )
+            if actual != expected:
+                raise ValueError(f"source checkpoint provenance mismatch for {field}")
     else:
         compatibility = verify_qa_reference_compatibility(
             config, table_count, fact_count, reference_dir=qa_condition_dir
@@ -1197,6 +1282,7 @@ def run_target_sft_training(
         fact_count=fact_count,
         example_count=len(train_records),
         layers=requested_layers,
+        dataset_dir=selected_dataset_dir,
     )
     started = time.perf_counter()
     model, tokenizer = _load_local_model_and_tokenizer(source_checkpoint)
@@ -1316,6 +1402,7 @@ def run_target_sft_training(
         "source_checkpoint_config_sha256": hash_file(source_checkpoint / "config.json"),
         "checkpoint_layer_verification": layer_provenance,
         "sft_dataset_path": provenance["dataset_path"],
+        "sft_dataset_dir": selected_dataset_dir,
         "qa_training_split": TARGET_SFT_TRAIN_SPLIT,
         "train_example_count": len(train_records),
         "total_examples": len(train_records),

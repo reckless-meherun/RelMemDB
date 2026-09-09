@@ -1,6 +1,8 @@
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,9 +10,11 @@ from config import load_config
 from data.cpt_test import CPT_TEST_PROBE_TYPES, EXP3_CPT_TEST_METHOD_VERSION
 from data.exp3 import (
     CLIMATE_BANDS,
+    EXP3_INVERSE_SFT_DATASET_DIR,
     build_exp3_aggregation_records,
     build_exp3_attribute_test_records,
     build_exp3_continent_rows,
+    build_exp3_inverse_sft_records,
     build_exp3_sft_records,
     generate_exp3_qa,
     materialize_exp3_dataset,
@@ -18,6 +22,7 @@ from data.exp3 import (
     verify_exp3_dataset,
     verify_exp3_qa,
 )
+from data.qa import normalize_for_leakage
 from evaluation.inference import load_verified_qa_split
 from evaluation.metrics import score_prediction, unordered_normalized_exact_match
 from scripts import run_exp03
@@ -133,6 +138,41 @@ def test_exp3_sft_and_inverse_aggregation_qa(
         assert 1 <= len(names) <= 2
         assert names == sorted(names, key=by_id.__getitem__)
 
+    inverse_sft_dir = verified["inverse_sft_data_dir"]
+    inverse_sft = read_jsonl(inverse_sft_dir / "train" / "H0.jsonl")
+    assert inverse_sft == build_exp3_inverse_sft_records(rows)
+    assert len(inverse_sft) == len(test_records)
+    assert all(
+        record["split"] == "train"
+        and record["hop"] == 0
+        and record["question"]
+        == (
+            "Name every continent associated with the "
+            f"{rows[index * 2]['climate_band']} climate band."
+        )
+        and record["gold_answer"] == test_records[index]["gold_answer"]
+        for index, record in enumerate(inverse_sft)
+    )
+    assert all(
+        read_jsonl(inverse_sft_dir / "train" / f"H{hop}.jsonl") == []
+        for hop in (1, 2, 3)
+    )
+    inverse_questions = {record["question"] for record in inverse_sft}
+    test_questions = {record["question"] for record in test_records}
+    assert inverse_questions.isdisjoint(test_questions)
+    assert {
+        normalize_for_leakage(question) for question in inverse_questions
+    }.isdisjoint(
+        {normalize_for_leakage(question) for question in test_questions}
+    )
+    inverse_manifest = read_json(inverse_sft_dir / "split_manifest.json")
+    assert inverse_manifest["exact_question_overlap_counts"] == {
+        "train__aggregation_test": 0
+    }
+    assert inverse_manifest["normalized_question_overlap_counts"] == {
+        "train__aggregation_test": 0
+    }
+
     loaded_sft, dev, _ = load_target_sft_dataset(
         qa_dir,
         dataset_dir="target_sft",
@@ -150,6 +190,17 @@ def test_exp3_sft_and_inverse_aggregation_qa(
     )
     assert loaded_sft == sft
     assert dev == []
+    loaded_inverse_sft, inverse_dev, inverse_provenance = load_target_sft_dataset(
+        qa_dir,
+        dataset_dir=EXP3_INVERSE_SFT_DATASET_DIR,
+        training_split="train",
+        dev_split=None,
+        table_count=1,
+        fact_count=10,
+    )
+    assert loaded_inverse_sft == inverse_sft
+    assert inverse_dev == []
+    assert inverse_provenance["dataset_dir"] == EXP3_INVERSE_SFT_DATASET_DIR
     assert loaded_test == test_records
     assert not (qa_dir / "validation").exists()
     assert not (qa_dir / "test").exists()
@@ -317,3 +368,120 @@ def test_exp3_best_checkpoint_replaces_only_on_strict_improvement(
     retained = read_json(destination.parent / "best_metadata.json")
     assert retained["epochs"] == 25
     assert retained["EM"] == 0.81
+
+
+def test_exp3_pipeline_runs_inverse_sft_from_attribute_sft_before_final_evals(
+    tmp_path: Path, exp3_config: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_root = tmp_path / "runs"
+    model_root = tmp_path / "models"
+    result_root = tmp_path / "results"
+    base_checkpoint = tmp_path / "base"
+    dataset_root = tmp_path / "dataset"
+    qa_root = tmp_path / "qa"
+    calls: list[tuple] = []
+    args = SimpleNamespace(fact_count=2, model="gpt2", layers=12)
+    resolved_config = deepcopy(exp3_config)
+    resolved_config["_runtime"] = {"run_timestamp": "test"}
+    resolved_config["_base_model"] = base_checkpoint
+    resolved_config["_layers"] = 12
+    dataset = {
+        "root": dataset_root,
+        "database": dataset_root / "database.sqlite",
+        "manifest_path": dataset_root / "manifest.json",
+        "cpt_dir": dataset_root / "cpt",
+        "cpt_manifest": dataset_root / "cpt" / "manifest.json",
+    }
+    qa = {
+        "root": qa_root,
+        "inverse_sft_data_dir": qa_root / EXP3_INVERSE_SFT_DATASET_DIR,
+    }
+
+    monkeypatch.setattr(run_exp03, "RUN_ROOT", run_root)
+    monkeypatch.setattr(run_exp03, "TRAINED_MODELS_ROOT", model_root)
+    monkeypatch.setattr(run_exp03, "RESULT_ROOT", result_root)
+    monkeypatch.setattr(run_exp03, "_timestamp", lambda: "test")
+    monkeypatch.setattr(run_exp03, "_parse_args", lambda: args)
+    monkeypatch.setattr(
+        run_exp03, "_resolved_config", lambda _args, _run_dir: resolved_config
+    )
+    monkeypatch.setattr(run_exp03, "_find_dataset", lambda *_args: dataset)
+    monkeypatch.setattr(run_exp03, "_find_qa", lambda *_args, **_kwargs: qa)
+
+    def fake_cpt(_config, *, source_checkpoint, output_checkpoint, **_kwargs):
+        calls.append(("cpt", Path(source_checkpoint), Path(output_checkpoint)))
+        return {"experiment": "exp03_continent_inverse"}
+
+    def fake_cpt_test(_config, *, checkpoint, output_dir, **_kwargs):
+        calls.append(("cpt_test", Path(checkpoint)))
+        return Path(output_dir)
+
+    def fake_sft(
+        _config,
+        *,
+        source_checkpoint,
+        output_checkpoint,
+        dataset_dir=None,
+        **_kwargs,
+    ):
+        calls.append(
+            (
+                "sft",
+                Path(source_checkpoint),
+                Path(output_checkpoint),
+                dataset_dir,
+            )
+        )
+        return {
+            "experiment": "exp03_continent_inverse",
+            "source_checkpoint": str(source_checkpoint),
+        }
+
+    def fake_evaluate(
+        _config, *, checkpoint, dataset_name, output_dir, include_unordered=False, **_kwargs
+    ):
+        calls.append(("evaluate", dataset_name, Path(checkpoint)))
+        metrics = {"overall": {"normalized_exact_match_accuracy": 0.5}}
+        if include_unordered:
+            metrics["unordered_exact_match"] = {
+                "unordered_normalized_exact_match_accuracy": 0.75
+            }
+        return metrics, Path(output_dir)
+
+    def fake_retain(source, destination, _metadata):
+        calls.append(("retain", Path(source), Path(destination)))
+        return True
+
+    monkeypatch.setattr(run_exp03, "run_cpt_training", fake_cpt)
+    monkeypatch.setattr(run_exp03, "_evaluate_cpt_test", fake_cpt_test)
+    monkeypatch.setattr(run_exp03, "run_target_sft_training", fake_sft)
+    monkeypatch.setattr(run_exp03, "_evaluate", fake_evaluate)
+    monkeypatch.setattr(run_exp03, "retain_best_exp3_checkpoint", fake_retain)
+
+    run_exp03.main()
+
+    sft_calls = [call for call in calls if call[0] == "sft"]
+    assert len(sft_calls) == 2
+    cpt_call = next(call for call in calls if call[0] == "cpt")
+    assert cpt_call[1] == base_checkpoint
+    cpt_checkpoint = cpt_call[2]
+    attribute_sft_checkpoint = sft_calls[0][2]
+    inverse_sft_checkpoint = sft_calls[1][2]
+    assert sft_calls[0][1] == cpt_checkpoint
+    assert sft_calls[0][3] is None
+    assert sft_calls[1][1] == attribute_sft_checkpoint
+    assert sft_calls[1][3] == EXP3_INVERSE_SFT_DATASET_DIR
+    evaluation_calls = [call for call in calls if call[0] == "evaluate"]
+    assert [call[1] for call in evaluation_calls] == [
+        "attribute_test",
+        "aggregation_test",
+    ]
+    assert {call[2] for call in evaluation_calls} == {inverse_sft_checkpoint}
+    retain_call = next(call for call in calls if call[0] == "retain")
+    assert retain_call[1] == inverse_sft_checkpoint
+    state = read_json(run_root / "pipeline_runs" / "test" / "pipeline_state.json")
+    assert state["attribute_sft_checkpoint_path"] == str(attribute_sft_checkpoint)
+    assert state["inverse_sft_checkpoint_path"] == str(inverse_sft_checkpoint)
+    assert state["final_evaluation_checkpoint_path"] == str(
+        inverse_sft_checkpoint
+    )

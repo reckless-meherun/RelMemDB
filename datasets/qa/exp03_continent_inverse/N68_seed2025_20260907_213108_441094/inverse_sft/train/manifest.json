@@ -1,0 +1,96 @@
+{
+  "N": 68,
+  "T": 1,
+  "aggregation_test_questions_sha256": "49907b5ff9c02f06a9cfa7a3c6ecc9aa008800e537d89a89e7e336bfa72e7f13",
+  "chain_count": 17,
+  "chain_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ],
+  "chain_indices_sha256": "82af92f300e56704ff3cc9fb24ef3eb9de2bdd54e2cb0f519b5a55dce37cda91",
+  "counts": {
+    "H0": {
+      "candidate_count": 17,
+      "final_retained_count": 17,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 17,
+      "support_closure_filtered_count": 0
+    },
+    "H1": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    },
+    "H2": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    },
+    "H3": {
+      "candidate_count": 0,
+      "final_retained_count": 0,
+      "leakage_filtered_count": 0,
+      "post_leakage_count": 0,
+      "support_closure_filtered_count": 0
+    }
+  },
+  "exact_question_overlap_counts": {
+    "train__aggregation_test": 0
+  },
+  "experiment_name": "exp03_continent_inverse",
+  "final_retained_total": 17,
+  "format_version": 2,
+  "generation_timestamp": null,
+  "inverse_sft_questions_sha256": "9aabaca62ff3e7c31a3e6f304642e022039752ff429cba65766dda873a14c699",
+  "normalized_question_overlap_counts": {
+    "train__aggregation_test": 0
+  },
+  "output_file_hashes": {
+    "H0.jsonl": "db90d7f40c63e56cbdc0d9a90bf9a577d4c08383315b4dc0476ce7a23391973b",
+    "H1.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H2.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "H3.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "question_template_version": "exp03_inverse_sft_train_v1",
+  "requested_N": 68,
+  "retained_counts": {
+    "H0": 17,
+    "H1": 0,
+    "H2": 0,
+    "H3": 0
+  },
+  "selected_positions": [
+    0
+  ],
+  "selected_tables": [
+    "continent"
+  ],
+  "sft_split_method_version": "one_per_used_climate_band_train_v1",
+  "source_aggregation_test_manifest_sha256": "b1a3e4627ed43d5b50deb7968e2c95e1ba8fc63bad3aa9bcf6c1b2cf9cd4cecd",
+  "source_database_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_database_sha256": "7dbb25631c8350a78ff3d9893fbad2e8f745b121b46a04de02cd3cdd318967d8",
+  "source_dataset_manifest_sha256": "61a08c82543a39d0f3a86564dda5ff021b8a55f3293a97dc49b52289b25a48ff",
+  "source_evaluation_split_manifest_sha256": "281c0a4cdc229c7bd98ff703684b59dc3812806635afdec6e1050aae21a3000d",
+  "source_training_data_dir": "/home/hpc4090/meherun/relmemdb/datasets/generated_databases/exp03_continent_inverse/N68_seed2025_20260907_213108_441094",
+  "split": "train",
+  "zero_context": true
+}
